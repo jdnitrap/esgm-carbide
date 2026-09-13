@@ -1,0 +1,42 @@
+DIFF SUMMARY
+- graph.py: E_contr now computed inside tick() for graph.contradiction_pairs
+  (registered via register_contradiction(i,j)). Same rule both sides:
+  tau_i -= LR*tau_j, tau_j -= LR*tau_i (LR=0.05), skipped for a frozen
+  side. No special-casing, no "-0.05 to the older one." clip_hits counts
+  every value actually altered by a clamp (activation cap + weight
+  floor/ceiling) each tick. save_json/load_json added: full edge state
+  (src,dst,w,tau,c,last_use,frozen,confirmed,rejected) + contradiction_pairs.
+- fact_gate.py: confirmed/rejected moved onto the graph itself (single
+  source of truth, no parallel copy). confirm()/reject() write graph.json
+  via graph.save_json().
+- task_c_contradiction.py: script now only registers the pair and calls
+  confirm() twice. All E_contr/tau math lives in tick(). Nothing local.
+
+TASK C: PASS (energy only)
+n=256, 50 ticks, no NaN, clip_hits=0 every tick (no external stimulus
+in this test, so nothing ever hits a bound).
+
+tick  E_contr   tau_A  tau_notA
+   0   0.0000  0.9990   0.4990
+   5   0.0000  0.9940   1.0000   <- confirm(notA) lands after this tick reads
+   6   0.9920  0.9431   0.9493
+  10   0.6521  0.7633   0.7710
+  15   0.3848  0.5844   0.5942
+  20   0.2260  0.4455   0.4579
+  25   0.1320  0.3373   0.3532
+  30   0.0764  0.2527   0.2730
+  35   0.0438  0.1861   0.2120
+  40   0.0246  0.1332   0.1663
+  45   0.0134  0.0904   0.1327
+  49   0.0079  0.0617   0.1130
+
+Note on tick 5: confirm(C,notA) is called AFTER that tick's g.tick()
+returns (loop order), so E_contr=0 still shows at row 5 — first nonzero
+is row 6. Timing artifact of the script loop, not the energy rule.
+
+Both tau values erode together, converging, driven only by E_contr —
+tau_A ends lower (0.0617 vs 0.1130) only because it had one tick's head
+start on decay before notA was confirmed, not because of any rule
+favoring one side.
+
+RELOAD CHECK: yes
