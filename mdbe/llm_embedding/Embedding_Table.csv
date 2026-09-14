@@ -1,0 +1,15 @@
+STANDARD layout:  ROWS = token IDs    COLUMNS = dimensions     shape (V x d),,,,,,,,,,,
+"This is the usual programming / paper layout (PyTorch nn.Embedding). Token ID picks an entire ROW. dim columns are unlabeled placeholders, not 'verbs'.",,,,,,,,,,,
+Token text,Token ID,dim_0,dim_1,dim_2,dim_3,dim_4,dim_5,dim_6,dim_7,L2 norm,Note
+How,1523,0.41,-0.12,0.08,0.55,-0.33,0.22,0.04,-0.18,0.826256618732945,question word
+does,1782,0.1,0.62,-0.21,0.14,0.05,-0.44,0.31,0.09,0.87086164228309,auxiliary verb
+a,264,-0.05,0.03,0.02,-0.07,0.11,0.01,-0.04,0.06,0.161554944214035,article
+ll,8891,0.28,-0.19,0.47,0.12,-0.51,0.33,0.08,-0.22,0.879545337091841,subword piece of llm
+m,76,0.22,-0.08,0.39,0.18,-0.4,0.29,0.11,-0.15,0.719722168617863,subword piece of llm
+work,990,0.15,0.48,-0.1,0.36,0.21,-0.27,0.52,0.04,0.884024886527523,verb/noun
+cat,4201,0.12,-0.4,0.88,0.21,-0.15,0.63,-0.08,0.17,1.2031624994156,shares dim_0 and dim_2 with dog
+dog,4202,0.12,0.05,0.88,0.19,-0.11,0.59,-0.02,0.21,1.11,shares dim_0 and dim_2 with cat
+run,5100,0.07,0.71,-0.18,0.44,0.09,-0.31,0.58,0.12,1.09087121146357,verb lemma
+running,5104,0.09,0.66,-0.16,0.41,0.11,-0.28,0.61,0.1,1.05356537528527,nearby vector to run
+,,,,,,,,,,,
+"Token ID selects the whole ROW. If you wanted dimensions down the side instead, use the next sheet — same numbers, flipped.",,,,,,,,,,,
