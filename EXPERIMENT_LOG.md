@@ -396,3 +396,120 @@ and `autopilot` this wave) don't have `ROLE_MAP` entries yet -- same
 `words_with_role()`'s pools for existing roles haven't grown to include
 most of the newest vocabulary. Hand-extending `ROLE_MAP` for ~200 more
 words is real, tedious work that hasn't been done.
+
+## 2026-09-14 (session 2, continued further) — 25-epoch heavy training,
+ROLE_MAP gap closed, autoregressive generation, and 6 rounds of
+dialogue fine-tuning that all failed the same honest way
+
+**ROLE_MAP gap closed.** Hand-extended from ~115 to 247 entries
+(covering the vocabulary above), same rule as always: assign only
+where confident regardless of context, leave genuinely ambiguous words
+(and/but/rather/etc) as a real "none". Full test suite still passes.
+
+**Heaviest real training run yet:** 25 epochs (was 4) on the full 5MB
+corpus, warm-started. Held-out accuracy 90.45% -> 91.23%, loss 0.378 ->
+0.327, 391.7s. Teach-back wrote 446,897 confident-and-correct
+predictions into the graph -- the largest volume yet, 0 frozen edges
+disturbed, `n` unchanged. Real generation off the accumulated graph
+still 6/6 grammar-correct afterward.
+
+**Autoregressive generation is real now (`generate_bytes.py`).** The
+trained head previously only ran teacher-forced; it can now sample its
+own next byte and feed it back in, querying the graph live each step
+(`word_at_position()`/`build_tag_table()` were already causal-only, so
+this needed zero changes to be streaming-safe). Rigorously tested, not
+just "it runs": 93.7% of generated tokens are valid English words,
+100% of generated role-transitions matched a role-bigram that genuinely
+occurs in the real corpus (mined from 262,485 real adjacent pairs),
+stable over 1000-byte runs with no repetition collapse, 88.5%
+word-validity even on seed words verified absent from the entire
+training corpus. 0 frozen edges ever touched. ~67% of 4-word windows
+ARE verbatim corpus recall though -- it leans heavily on memorized
+phrasing, this is not free composition.
+
+**Two new deterministic "speech mechanics" columns**, same hand-given-
+fact pattern as `byte_identity.py`: `TURN` (QUESTION/ANSWER/none, a
+forward scan for "Q:"/"A:" markers) and `QUESTION_FORM` (WH_WHAT/
+WH_WHO/.../YES_NO/IMPERATIVE, detected from each question's real
+opening word, held through its answer -- not reset at "A:", so the
+signal is live exactly when the answer needs it). N_COLUMNS 32 -> 35 ->
+45.
+
+**Real discourse relations, grounded in published research (Penn
+Discourse Treebank) instead of invented**, at explicit user direction
+to search for prior art first. `DISCOURSE` extended from 3 values
+(AFFIRM/NEGATE/NEGATOR) to 7, adding PDTB's standard four semantic
+classes: TEMPORAL, CONTINGENCY, COMPARISON, EXPANSION. 28 real
+connective words wired in, 22 newly tiled. N_COLUMNS 45 -> 49.
+
+**Real self-dimension-discovery (`discover_dimension.py`)** -- the one
+genuinely new-in-kind capability, not just another hand-given column,
+at explicit user request ("make it have the ability to add dimension
+to itself"). Uses the distributional hypothesis: clusters currently-
+unassigned words by the ROLE of their real preceding/following
+neighbor, mined from the actual corpus. Human-gated exactly like
+`fact_gate.py` -- `propose_dimensions()` is read-only, `confirm_dimension()`
+is the only thing that writes, called explicitly. Found and confirmed
+two real clusters against the live graph: `DISCOVERED_ADJECTIVE_LIKE`
+and `DISCOVERED_NOUN_LIKE`, both correctly rediscovering real
+grammatical categories from pure context statistics, no ROLE_MAP hint
+given. **Not yet wired into `head.py`'s N_COLUMNS/build_tag_table** --
+confirmed in the graph and in `discovered_dimensions.json`, but the
+trained head doesn't read them yet.
+
+**Six rounds of dialogue fine-tuning (`dialogue_corpus.txt`,
+`train_dialogue.py`), all honestly reported as failing to reach real
+conversational coherence -- a genuine, diagnosed ceiling, not swept
+under the rug:**
+1. 51 pairs x6 repeats x200 epochs -> catastrophic overfitting
+   (held-out accuracy dead flat 84.05%->84.03%, essay fluency
+   96.3%->86.6%)
+2. 203 pairs (66 facts x3 phrasings) + TURN column -> overfitting
+   fixed, content still topically irrelevant to the question asked
+3. + QUESTION_FORM column -> no improvement; confirmed DATA problem,
+   not a missing-signal problem
+4. 827 pairs (137 facts x6 phrasings), 40 epochs -> healthier curve,
+   still climbing, worse output than round 2
+5. same, 150 epochs -> accuracy plateaued cleanly (76.2%->82.7%) but
+   real mode collapse: identical short garbled answers for different
+   questions ("Pater. Theshs, better world.")
+6. + PDTB discourse relations + discovered dimensions (N_COLUMNS->49),
+   40 epochs -> held-out accuracy started at just 16% (vs ~77-84%
+   every prior warm-start) because 22 newly-wired connective words are
+   among the most common in English, shifting the tag distribution
+   far more than any earlier column addition; climbed to 78% but still
+   under-converged, conversation quality worse not better, and the
+   essay-only checkpoint (never retrained on the new columns) broke
+   down completely when loaded fresh.
+
+**Final diagnosis, worked out with the user across the last several
+turns of the session, not just my own guess:** the real problem was
+never epoch count (tried 12/40/150/200, same collapse every time) --
+it's that `dialogue_corpus.txt`'s answers are short, formulaic,
+flashcard-style, one sentence in the same rhythm every time. The
+essay-only head, by contrast, is genuinely fluent because the essay
+corpus itself is rich, varied, natural prose. The direct analogy that
+crystallized this (the user's own framing, confirmed against how
+Claude itself is actually trained): pretraining on broad rich text
+produces fluent continuation (== the essay-only head, already working
+well); a SEPARATE fine-tuning stage on real prompt->response
+DEMONSTRATIONS, written to the SAME quality bar as the pretraining
+data, is what teaches instruction-following/conversation -- not just
+more examples in a thin, repeated shape. `dialogue_corpus.txt` never
+had that quality bar. Held-out next-BYTE accuracy is also NOT a
+reliable proxy for conversational coherence at this scale -- round 5
+proved that directly (accuracy climbed cleanly to 82.7% while output
+degraded into repeated garbage).
+
+**For a future session, in priority order if dialogue capability gets
+picked up again:** (1) rewrite `dialogue_corpus.txt` with genuinely
+rich, natural, multi-sentence answers instead of one-line facts --
+don't just add more pairs in the same thin shape, that lever is
+exhausted; (2) retrain `head_checkpoint.pt` itself (plain essay-only)
+now that the graph has grown to 49 columns, since it currently breaks
+down if loaded fresh, never having seen the new high-frequency
+DISCOURSE columns; (3) wire `discovered_dimensions.json` into
+`head.py` (never done this session); (4) consider sampling changes
+(nucleus/top-k instead of plain multinomial, a repetition penalty) to
+directly address the mode-collapse symptom, since it showed up
+independent of dataset size or epoch count.
