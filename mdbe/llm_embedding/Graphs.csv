@@ -1,0 +1,14 @@
+Graphs of the toy embedding table,,,,,,,,,,,,
+Left scatter: each token plotted after compressing 8 dims to 2 (PCA). Nearby points = similar full vectors. Right bars: raw dim_0..dim_7 for four tokens. Cosine heatmap is still on the Cosine Similarity sheet.,,,,,,,,,,,,
+,,,,,,,,,,,,
+Token,PC1,PC2,,,,,,dim,cat,dog,run,running
+How,-0.2731,-0.5066,,,,,,dim_0,0.12,0.12,0.07,0.09
+does,0.7846,0.026,,,,,,dim_1,-0.4,0.05,0.71,0.66
+a,0.0132,0.1313,,,,,,dim_2,0.88,0.88,-0.18,-0.16
+ll,-0.6345,-0.3172,,,,,,dim_3,0.21,0.19,0.44,0.41
+m,-0.466,-0.2248,,,,,,dim_4,-0.15,-0.11,0.09,0.11
+work,0.6852,0.055,,,,,,dim_5,0.63,0.59,-0.31,-0.28
+cat,-1.0488,0.2707,,,,,,dim_6,-0.08,-0.02,0.58,0.61
+dog,-0.7649,0.4343,,,,,,dim_7,0.17,0.21,0.12,0.1
+run,0.8732,0.0662,,,,,,,,,,
+running,0.8311,0.0651,,,,,,,,,,

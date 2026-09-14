@@ -1,0 +1,14 @@
+Both orientations are the same matrix,
+,
+Piece,Meaning
+Standard orientation,"Rows = token IDs, columns = dimensions. Shape (V × d). Sheet 'Embedding Table'. What PyTorch stores."
+Flipped orientation,"Rows = dimensions, columns = token IDs. Shape (d × V). Sheet 'Transposed (dims as rows)'."
+What token ID looks up,"The full vector for that token. A whole ROW in standard view, or a whole COLUMN in flipped view."
+Token text / Token ID,Human piece vs integer index into the table. ID is what the model uses.
+dim_0 … dim_7,"Unlabeled placeholder axes. Not verbs, nouns, or any fixed category."
+Shared numbers,"cat and dog both have dim_0=0.12 and dim_2=0.88. Still two tokens, because the ID / full vector differs."
+L2 norm / cosine,"Length of a vector, and angle between two full vectors. Similarity uses every dimension together."
+After attention,A position’s vector is no longer a pure embedding row. Attention mixes many tokens into it.
+Real model size,"Tens or hundreds of thousands of token rows, thousands of dim columns. Same two possible drawings."
+,
+Teaching numbers only — not weights from a trained model.,

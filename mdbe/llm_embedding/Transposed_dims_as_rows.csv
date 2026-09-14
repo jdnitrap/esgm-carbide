@@ -1,0 +1,16 @@
+FLIPPED layout:  ROWS = dimensions    COLUMNS = token IDs     shape (d x V),,,,,,,,,,
+Same data rotated 90°. A COLUMN is one token’s vector (what the model looks up). A ROW is one dimension across every token.,,,,,,,,,,
+Token text →,How,does,a,ll,m,work,cat,dog,run,running
+Token ID →,1523,1782,264,8891,76,990,4201,4202,5100,5104
+,,,,,,,,,,
+dim_0,0.41,0.1,-0.05,0.28,0.22,0.15,0.12,0.12,0.07,0.09
+dim_1,-0.12,0.62,0.03,-0.19,-0.08,0.48,-0.4,0.05,0.71,0.66
+dim_2,0.08,-0.21,0.02,0.47,0.39,-0.1,0.88,0.88,-0.18,-0.16
+dim_3,0.55,0.14,-0.07,0.12,0.18,0.36,0.21,0.19,0.44,0.41
+dim_4,-0.33,0.05,0.11,-0.51,-0.4,0.21,-0.15,-0.11,0.09,0.11
+dim_5,0.22,-0.44,0.01,0.33,0.29,-0.27,0.63,0.59,-0.31,-0.28
+dim_6,0.04,0.31,-0.04,0.08,0.11,0.52,-0.08,-0.02,0.58,0.61
+dim_7,-0.18,0.09,0.06,-0.22,-0.15,0.04,0.17,0.21,0.12,0.1
+,,,,,,,,,,
+Look down a COLUMN to see one token (token ID lookup). Look across a ROW to see one unlabeled dimension shared by all tokens.,,,,,,,,,,
+"Neither layout is more true. Code almost always stores (V, d) = tokens as rows. Diagrams sometimes draw (d, V) = dims as rows.",,,,,,,,,,

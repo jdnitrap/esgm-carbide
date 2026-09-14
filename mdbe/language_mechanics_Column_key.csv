@@ -1,0 +1,14 @@
+Column key — mechanic names only,,
+Column,Mechanic,One-line meaning
+B,Channel,The physical carrier the message rides on.
+C,Phonetics,The actual sounds the body makes and the ear receives.
+D,Phonology,Which sound differences a language treats as meaningful.
+E,Orthography,"How the language is written: letters, spaces, marks."
+F,Tokenization,Where the stream is cut into processable pieces.
+G,Morphology,How words are built from smaller meaning pieces.
+H,Lexicon,The stored inventory of form–meaning pairs.
+I,Syntax,How words combine into phrases and clauses.
+J,Semantics,The literal who-did-what meaning of the combination.
+K,Pragmatics,"What the speaker is doing by saying it, in this situation."
+L,Discourse,How sentences link across a text or conversation.
+M,Sociolinguistics,"How form signals group, status, stance, or setting."
