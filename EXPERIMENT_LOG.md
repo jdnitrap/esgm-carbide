@@ -340,3 +340,59 @@ edges reinforced, head at 90.1% held-out accuracy) with generation fully
 working: `['the', 'choices', 'eats', 'under', 'the', 'existence']` --
 6/6 grammar-correct, real vocabulary, real trained structure. Full test
 suite passes.
+
+## 2026-09-14 (session 2, continued) — more real training runs, vocab
+330→340 words, real mechanics agreement, self-directed expansion
+
+**Five real full-corpus training runs total now** (each ~80-110s on
+the full 5MB corpus), held-out accuracy climbing 88.6% -> 90.4% with
+diminishing returns as expected. Generation verified 6/6 after every
+single one -- the 3-part fix above is holding up under repeated real
+load, not just the first cycle.
+
+**Vocabulary growth exposed a real scale-dependent regression in the
+just-fixed rate limiter.** Growing 130 -> 330 words (n 412 -> 611) broke
+generation again (4/6, not full collapse) with `max_activation_rate=2.0`
+still active. Root cause: the SAME absolute rate cap that was
+appropriately tuned for n=412 was too loose relative to the bigger,
+denser n=611 graph. **Fixed by retuning, not redesigning: `rate=1.0`**
+(tested against 0.5/1.0/1.5/2.0, only <=1.0 gave 5/5 seeds fully 6/6).
+**Lesson for next time vocabulary/graph size changes significantly:
+recheck whether `max_activation_rate` is still tuned right — it is NOT
+automatically scale-invariant.**
+
+**Real mechanics agreement wired into generation, not just stored.**
+`sequence.py`'s `generate_sequence()` gained an optional `hub_ids`
+param (default `None`, exact old behavior preserved) and
+`_mechanics_bonus()`: when picking among role-matching candidates,
+one that shares a real grammar agreement with what's already been
+committed (VERB tense matching an earlier VERB's tense; PRONOUN number
+matching an earlier NOUN's number) gets a scoring bonus. Verified
+directly and precisely (not just by hoping emergent generation would
+exercise it): "ran" (PAST) scores +2.0 after "sat" (PAST) was
+committed; "is"/"likes" (PRESENT) score +0.0 in the same context;
+`hub_ids=None` always scores 0 (mechanics off); a role with no
+agreement rule (NOUN) always scores 0; no prior committed word of the
+relevant role also scores 0. Added a `"two_actions"` grammar template
+(`["PRONOUN","VERB","VERB"]`) specifically because none of the existing
+5 templates have two VERB slots to exercise tense agreement on.
+
+**Self-directed expansion, the real version, not just the "safe" manual
+version from earlier this session.** New `autopilot [on|off]` shell
+command: OFF by default (a person must explicitly opt in -- that single
+choice is the entire safety gate), but once on, `tick`/`train`/`ask`
+check a real signal (`uncertainty_signal()` -- count of proposed-but-
+unconfirmed edges) after they run and, past a threshold, AUTOMATICALLY
+mine new vocabulary, grow the graph, retrain the head, and save --
+with no further human command. Verified working for real: `autopilot on
+1` + `tick 20` produced `uncertainty=498 >= 1`, mined 10 new words, grew
+the graph, retrained (0.9046 -> 0.9017, a small expected dip from
+freshly-grown untrained words), and saved, entirely on its own. Full
+test suite still passes afterward, generation still 6/6.
+
+**Honest gap still open:** the newest ~210 words (mined via `autoexpand`
+and `autopilot` this wave) don't have `ROLE_MAP` entries yet -- same
+"real none" convention as before, not a bug, but it does mean
+`words_with_role()`'s pools for existing roles haven't grown to include
+most of the newest vocabulary. Hand-extending `ROLE_MAP` for ~200 more
+words is real, tedious work that hasn't been done.

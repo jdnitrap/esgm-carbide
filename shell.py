@@ -80,6 +80,7 @@ auto [on|off]  (with no arg, prints current state; on = sustained-trust candidat
 autoexpand [n=20]  (mines the corpus for the n most common real words not yet tiled, adds them unattended)
 uncertainty  (how many proposed-but-unconfirmed edges exist right now -- a real signal for when retrain_head might be worth running)
 retrain_head [epochs=3]  (warm-starts from the saved checkpoint if one exists, trains on real corpus bytes, saves)
+autopilot [on [threshold]|off]  (once on, tick/train/ask fire autoexpand+retrain_head on their own when uncertainty crosses the threshold -- default threshold=50)
 say
 status
 tiles
@@ -108,6 +109,28 @@ def main():
     gate = FactGate(graph, json_path=DEFAULT_PATH)
     last_info = None
     poked_since_load = set()
+    autopilot = {"on": False, "threshold": 50}
+
+    def maybe_autopilot():
+        # The self-directed piece: nothing here fires unless a person
+        # explicitly ran `autopilot on` first -- that single opt-in is
+        # the whole safety gate. Once on, the SYSTEM decides *when*
+        # (real uncertainty signal crossing a threshold), not a person
+        # re-running autoexpand/retrain_head by hand every time.
+        if not autopilot["on"]:
+            return
+        n = uncertainty_signal(graph, gate)
+        if n < autopilot["threshold"]:
+            return
+        print(f"[autopilot] uncertainty={n} >= {autopilot['threshold']} -- growing vocabulary and retraining")
+        stats = auto_expand_vocab(graph, TILES, n_words=10)
+        TILES_REV.clear()
+        TILES_REV.update({v: k for k, v in TILES.items()})
+        print(f"[autopilot] mined {len(stats['mined'])} words, grew graph {stats['grown']} times")
+        rt_stats = retrain_head(graph, n_epochs=1)
+        print(f"[autopilot] retrained: {rt_stats['before_acc']:.4f} -> {rt_stats['after_acc']:.4f}")
+        graph.save_json(DEFAULT_PATH)
+        print("[autopilot] saved")
 
     def report_auto_confirms(new_indices):
         # Silent when auto_confirm is off, so existing manual-confirm
@@ -161,6 +184,22 @@ def main():
                 last_info = graph.tick(external_input=None)
                 report_auto_confirms(gate.step())
             print(f"ticked {n}")
+            maybe_autopilot()
+
+        elif cmd == "autopilot":
+            if not args:
+                print(f"{'on' if autopilot['on'] else 'off'} (threshold={autopilot['threshold']})")
+            elif args[0] == "on":
+                autopilot["on"] = True
+                if len(args) > 1:
+                    autopilot["threshold"] = int(args[1])
+                print(f"autopilot on (threshold={autopilot['threshold']}) -- growth/retraining will "
+                      f"fire on their own after tick/train/ask when uncertainty crosses the threshold")
+            elif args[0] == "off":
+                autopilot["on"] = False
+                print("autopilot off")
+            else:
+                print("usage: autopilot <on [threshold]|off>")
 
         elif cmd == "auto":
             if not args:
@@ -305,6 +344,7 @@ def main():
                 print_say(decode(graph), poked_since_load)
                 fired = [name for name, node in TILES.items() if graph.x[node] > 0]
                 print("fired:", " ".join(fired))
+                maybe_autopilot()
 
         elif cmd == "gen":
             grammar_name = None
@@ -349,6 +389,7 @@ def main():
                     last_info = graph.tick(external_input=stim)
                     report_auto_confirms(gate.step())
             print(f"trained {reps} reps over {len(sentences)} sentences")
+            maybe_autopilot()
 
         elif cmd == "quit":
             break

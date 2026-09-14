@@ -39,7 +39,47 @@ GRAMMARS = {
     "prepositional": ["ARTICLE", "NOUN", "VERB", "PREPOSITION", "ARTICLE", "NOUN"],
     "pronoun_subject": ["PRONOUN", "VERB"],
     "pronoun_object": ["PRONOUN", "VERB", "ARTICLE", "ADJECTIVE", "NOUN"],
+    # Two VERB slots specifically to exercise real tense agreement (see
+    # _mechanics_bonus below) -- none of the templates above have a
+    # second verb, so tense-consistency scoring had nothing to act on
+    # until this one existed. Not fully fluent English (needs a
+    # conjunction to be natural), same level of abstraction the other
+    # templates already operate at.
+    "two_actions": ["PRONOUN", "VERB", "VERB"],
 }
+
+# Which mechanics dimension constrains agreement with which role, and
+# which prior role it should agree WITH -- e.g. a second VERB should
+# share TENSE with the first VERB already committed. Real English
+# grammar rules, not invented: tense consistency across a compound verb
+# phrase, number agreement between a pronoun and an earlier noun.
+_AGREEMENT_RULES = {
+    "VERB": ("TENSE", "VERB"),
+    "PRONOUN": ("NUMBER", "NOUN"),
+}
+
+
+def _mechanics_bonus(graph, hub_ids, candidate, expected_role, committed_by_role):
+    """Real, hand-given grammar agreement, not invented: if this
+    candidate's mechanics value (e.g. TENSE) matches the same dimension
+    on an already-committed word of the role it should agree with,
+    return a bonus so scoring prefers it. Returns 0 if hub_ids wasn't
+    given (mechanics-agreement off, exact old behavior), the rule
+    doesn't apply to this role, no prior word of that role has been
+    committed yet, or the candidate's value for that dimension is
+    genuinely "none" -- a real absence, not something to force."""
+    if hub_ids is None or expected_role not in _AGREEMENT_RULES:
+        return 0.0
+    from grammar_extra import get_value
+    dim, agree_with_role = _AGREEMENT_RULES[expected_role]
+    prior = committed_by_role.get(agree_with_role)
+    if prior is None:
+        return 0.0
+    prior_value = get_value(graph, hub_ids, dim, prior)
+    if prior_value is None:
+        return 0.0
+    candidate_value = get_value(graph, hub_ids, dim, candidate)
+    return 2.0 if candidate_value == prior_value else 0.0
 
 
 def _score(graph, node):
@@ -47,14 +87,22 @@ def _score(graph, node):
 
 
 def generate_sequence(graph, prompt_nodes, grammar=None, max_len=12,
-                       temperature=0.0, seed_ticks=4, step_ticks=2):
+                       temperature=0.0, seed_ticks=4, step_ticks=2, hub_ids=None):
     """Returns (sequence, trace) — sequence is the ordered list of
     committed node ids; trace is per-step detail for verification.
+
+    hub_ids (optional, default None): grammar_extra.py's hub id map.
+    When given, candidates that share a real mechanics agreement (verb
+    tense, pronoun/noun number) with what's already been committed are
+    preferred over ones that don't, on top of raw activation score.
+    None (default) preserves the exact original behavior -- no existing
+    caller is affected unless it opts in.
     """
     grammar = grammar if grammar is not None else DEFAULT_GRAMMAR
     sequence = []
     trace = []
     slot = 0
+    committed_by_role = {}
 
     seed_stim = torch.zeros(graph.n)
     for node in prompt_nodes:
@@ -96,7 +144,8 @@ def generate_sequence(graph, prompt_nodes, grammar=None, max_len=12,
         if expected_role is not None:
             role_matches = [c for c in candidates if c in role_pool]
             if role_matches:
-                picked = max(role_matches, key=lambda c: _score(graph, c))
+                picked = max(role_matches, key=lambda c: _score(graph, c)
+                             + _mechanics_bonus(graph, hub_ids, c, expected_role, committed_by_role))
                 picked_reason = f"role_match:{expected_role}"
 
         if picked is None and candidates:
@@ -115,6 +164,7 @@ def generate_sequence(graph, prompt_nodes, grammar=None, max_len=12,
         sequence.append(picked)
         prev_committed = picked
         if picked_reason == f"role_match:{expected_role}":
+            committed_by_role[expected_role] = picked
             slot += 1
         if slot >= len(grammar):
             break
