@@ -44,13 +44,23 @@ def supervised_step(graph, context_node, correct_node, candidate_pool, lr=0.2, t
     if was_correct:
         # reinforce a correct call a bit further, same direction tick()
         # would already push it, just faster and not contingent on
-        # actually co-firing this tick.
+        # actually co-firing this tick. Clamped to graph.max_weight --
+        # real bug found by testing at scale (2026-09-14, full 5MB
+        # corpus): this used to be an unbounded += with no ceiling, and
+        # an edge taught hundreds of times (extremely common byte pairs
+        # like ','->' ' occur constantly in real text) grew to w=536,
+        # dwarfing everything else in the graph (frozen edges sit at
+        # 1.0) and drowning out word-level generation entirely in kWTA
+        # competition. tick()'s own Hebbian growth is naturally bounded
+        # by the m_raw/(1+abs(m_raw)) saturation in message-passing;
+        # supervised_step writes directly and has no such saturation of
+        # its own, so it needs an explicit one.
         if not bool(graph.frozen[correct_idx]):
-            graph.w[correct_idx] = graph.w[correct_idx] + lr * 0.5
+            graph.w[correct_idx] = torch.clamp(graph.w[correct_idx] + lr * 0.5, max=graph.max_weight)
             graph.tau[correct_idx] = torch.clamp(graph.tau[correct_idx] + tau_lr * 0.5, max=1.0)
     else:
         if not bool(graph.frozen[correct_idx]):
-            graph.w[correct_idx] = graph.w[correct_idx] + lr
+            graph.w[correct_idx] = torch.clamp(graph.w[correct_idx] + lr, max=graph.max_weight)
             graph.tau[correct_idx] = torch.clamp(graph.tau[correct_idx] + tau_lr, max=1.0)
         if guess_idx is not None and not bool(graph.frozen[guess_idx]):
             graph.w[guess_idx] = torch.clamp(graph.w[guess_idx] - lr, min=0.0)

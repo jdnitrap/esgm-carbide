@@ -29,9 +29,9 @@ def uncertainty_signal(graph, gate):
     return int(gate.proposed.sum().item())
 
 
-def _load_data():
+def _load_data(sample_bytes=SAMPLE_BYTES):
     with open(CORPUS_PATH, "rb") as f:
-        data = f.read(SAMPLE_BYTES)
+        data = f.read(sample_bytes)
     starts = list(range(0, len(data) - SEQ_LEN - 1, SEQ_LEN))
     random.shuffle(starts)
     split = int(len(starts) * 0.8)
@@ -52,7 +52,8 @@ def _eval_acc(model, x, y, t):
 
 
 def retrain_head(graph, n_epochs=3, checkpoint_path=CHECKPOINT_PATH,
-                  tiles_path="tiles.json", hubs_path="grammar_extra_hubs.json"):
+                  tiles_path="tiles.json", hubs_path="grammar_extra_hubs.json",
+                  sample_bytes=SAMPLE_BYTES):
     """Loads the existing checkpoint (warm-starting if the graph's tag
     structure grew since it was saved) or starts fresh if none exists
     yet, trains n_epochs on a real corpus sample, saves the result.
@@ -62,7 +63,7 @@ def retrain_head(graph, n_epochs=3, checkpoint_path=CHECKPOINT_PATH,
     tiles = json.load(open(tiles_path))
     hub_ids = json.load(open(hubs_path)) if os.path.exists(hubs_path) else {}
 
-    data, train_starts, held_starts = _load_data()
+    data, train_starts, held_starts = _load_data(sample_bytes)
     tag_table = build_tag_table(graph, hub_ids, tiles, data)
 
     had_checkpoint = os.path.exists(checkpoint_path)

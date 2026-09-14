@@ -19,7 +19,8 @@ TAU_TRUST_THRESHOLD = 0.3
 class ESGRGraph:
     def __init__(self, n_nodes=8192, mean_out_degree=12, active_fraction=0.05,
                  eta=1e-2, lam=1e-3, seed=0, max_activation=5.0, max_weight=2.0,
-                 use_hard_clip=False, modulation_decay=0.97):
+                 use_hard_clip=False, modulation_decay=0.97, max_activation_rate=None,
+                 split_sparsity_at=None):
         g = torch.Generator().manual_seed(seed)
         self.n = n_nodes
         self.active_fraction = active_fraction
@@ -74,6 +75,30 @@ class ESGRGraph:
         # the plain two-factor rule — this is additive, not a replacement.
         self.modulation = torch.ones(n_nodes)
         self.modulation_decay = modulation_decay
+
+        # Rate limiter on the message-passing (cascading, internal)
+        # contribution to activation -- a leaky-bucket, same principle
+        # network traffic shaping uses: let signal through at a bounded
+        # rate instead of letting a burst fully land in one shot. Found
+        # by testing (2026-09-14): teaching back hundreds of thousands
+        # of real predictions strengthened enough ordinary byte-to-byte
+        # edges that word-level activity, direct-poked at a stable 3.0,
+        # got buried under cascading byte activity reaching 16 within
+        # TWO ticks -- nothing bounded how fast a newly-strengthened
+        # cluster of edges could resonate. None (default) disables this
+        # entirely -- byte-for-byte identical to the old behavior --
+        # so every existing test and prior run is unaffected unless a
+        # caller opts in. Deliberately does NOT limit external_input
+        # (a direct poke): that's added after this, at full strength,
+        # unrate-limited -- only the emergent, internal cascade is
+        # smoothed, not deliberate stimulation.
+        self.max_activation_rate = max_activation_rate
+
+        # Split kWTA budget -- see _enforce_sparsity()'s docstring.
+        # None (default) preserves the exact original single-pool
+        # behavior; every existing test and prior run is unaffected
+        # unless a caller opts in.
+        self.split_sparsity_at = split_sparsity_at
 
     def find_edge(self, src, dst):
         return self.edge_index.get((src, dst))
@@ -243,6 +268,34 @@ class ESGRGraph:
         self.edge_index[(src, dst)] = i
         return i
 
+    def _topk_select(self, x: torch.Tensor, k: int, temperature: float) -> torch.Tensor:
+        """The actual top-k/stochastic-k selection, factored out of
+        _enforce_sparsity() so split-budget mode (below) can apply the
+        exact same, already-tested logic to two independent slices
+        instead of duplicating it.
+
+        temperature=0.0: deterministic hard top-k, byte-for-byte
+        unchanged from the original single-pool implementation.
+
+        temperature>0.0: stochastic — sample k without replacement,
+        weighted by softmax(x/temperature), restricted to a real
+        candidate pool first (see _enforce_sparsity's docstring for
+        why: softmax over a mostly-zero field dilutes real signal).
+        """
+        if temperature <= 0.0:
+            topk_vals, topk_idx = torch.topk(x, k)
+            out = torch.zeros_like(x)
+            out[topk_idx] = topk_vals
+            return out
+        pool_size = min(x.shape[0], min(k * 3, max(1, int((x > 0).sum().item()))))
+        pool_vals, pool_idx = torch.topk(x, pool_size)
+        probs = torch.softmax(pool_vals / temperature, dim=0)
+        chosen = torch.multinomial(probs, min(k, pool_size), replacement=False)
+        idx = pool_idx[chosen]
+        out = torch.zeros_like(x)
+        out[idx] = x[idx]
+        return out
+
     def _enforce_sparsity(self, x: torch.Tensor, temperature: float = 0.0) -> torch.Tensor:
         """Hard quota, not a threshold club: ALWAYS keep exactly the top
         k = floor(active_fraction * n) values. theta is not used here;
@@ -263,37 +316,33 @@ class ESGRGraph:
         Same role as sampling temperature in ordinary language-model
         decoding — applied here to WHICH NODES fire, not to a
         vocabulary distribution, since there is no vocabulary here.
+
+        split_sparsity_at (constructor param, default None = disabled):
+        when set to a node index, the quota is computed and applied
+        SEPARATELY for [0, split) and [split, n) -- e.g. split=256
+        gives byte nodes their own k and every word-level node (tiles,
+        role hubs, category hubs, grammar_extra hubs) a completely
+        separate k, so byte-level activity can never occupy a
+        word-level seat no matter how much of it there is. Found
+        necessary by testing (2026-09-14): a rate limiter alone (see
+        max_activation_rate) slows how fast any ONE node's activation
+        can climb, but does nothing to stop many DIFFERENT reinforced
+        byte pathways from collectively filling a single shared budget
+        -- teaching a trained head's real predictions back into the
+        graph strengthened 497 ordinary edges, and even individually
+        rate-limited, enough of them climbing together crowded out
+        word-level generation entirely. Splitting the budget is the
+        structural fix: capacity, not just speed.
         """
-        k = max(1, int(self.active_fraction * self.n))
-        if temperature <= 0.0:
-            topk_vals, topk_idx = torch.topk(x, k)
-            out = torch.zeros_like(x)
-            out[topk_idx] = topk_vals
-            return out
-        # Restrict the sampling pool to a real candidate set first (a
-        # generous multiple of k, or every positive value if fewer)
-        # before applying temperature — softmax-ing over the full,
-        # mostly-zero 300-node field dilutes the real signal under
-        # hundreds of near-equal near-zero entries, found by testing:
-        # temperature=0.8 over the full field produced near-uniform
-        # random selection and stopped hitting any tile at all.
-        # Real bug found by testing (2026-09-13, after vocabulary growth
-        # 31->130 words): this was `max(k*3, positive_count)`, the exact
-        # opposite of what the comment above describes. It happened to
-        # look correct on the old, sparser 300-node graph, where
-        # positive_count rarely exceeded k*3 (so max() and min() agreed
-        # by coincidence) -- but on the larger, denser real graph,
-        # positive_count routinely hit 326/399, and max() let the
-        # sampling pool balloon to 326 candidates, diluting the softmax
-        # exactly the way this function's docstring warns against.
-        pool_size = min(x.shape[0], min(k * 3, max(1, int((x > 0).sum().item()))))
-        pool_vals, pool_idx = torch.topk(x, pool_size)
-        probs = torch.softmax(pool_vals / temperature, dim=0)
-        chosen = torch.multinomial(probs, min(k, pool_size), replacement=False)
-        idx = pool_idx[chosen]
-        out = torch.zeros_like(x)
-        out[idx] = x[idx]
-        return out
+        if self.split_sparsity_at is None:
+            k = max(1, int(self.active_fraction * self.n))
+            return self._topk_select(x, k, temperature)
+        split = self.split_sparsity_at
+        k_a = max(1, int(self.active_fraction * split))
+        k_b = max(1, int(self.active_fraction * (self.n - split)))
+        out_a = self._topk_select(x[:split], k_a, temperature)
+        out_b = self._topk_select(x[split:], k_b, temperature)
+        return torch.cat([out_a, out_b])
 
     def tick(self, external_input: torch.Tensor = None, temperature: float = 0.0):
         clip_hits = 0
@@ -308,6 +357,8 @@ class ESGRGraph:
         agg.index_add_(0, self.dst[trusted], m)
 
         raw = torch.relu(agg)  # theta unused while hard quota is on
+        if self.max_activation_rate is not None:
+            raw = torch.min(raw, self.x + self.max_activation_rate)
         if external_input is not None:
             raw = raw + external_input  # a poked node fires this tick, before kWTA
         if self.use_hard_clip:
@@ -420,6 +471,8 @@ class ESGRGraph:
             "max_activation": self.max_activation, "max_weight": self.max_weight,
             "use_hard_clip": self.use_hard_clip,
             "modulation": self.modulation.tolist(), "modulation_decay": self.modulation_decay,
+            "max_activation_rate": self.max_activation_rate,
+            "split_sparsity_at": self.split_sparsity_at,
             "contradiction_pairs": self.contradiction_pairs,
             "edges": [
                 {"src": int(s), "dst": int(d), "w": float(w), "tau": float(t), "c": float(c),
@@ -448,6 +501,12 @@ class ESGRGraph:
         # they load exactly as before, no behavior change on old files.
         g.modulation = torch.tensor(data["modulation"]) if "modulation" in data else torch.ones(data["n"])
         g.modulation_decay = data.get("modulation_decay", 0.97)
+        # older saves predate the rate limiter -- default to None
+        # (disabled), identical to their original behavior.
+        g.max_activation_rate = data.get("max_activation_rate", None)
+        # older saves predate the split-budget kWTA -- default to None
+        # (disabled), identical to their original behavior.
+        g.split_sparsity_at = data.get("split_sparsity_at", None)
         g.contradiction_pairs = [tuple(p) for p in data["contradiction_pairs"]]
         edges = data["edges"]
         g.src = torch.tensor([e["src"] for e in edges], dtype=torch.long)

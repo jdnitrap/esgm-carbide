@@ -249,3 +249,94 @@ All of the above verified never touches `graph.w`/`tau`/`confirmed`/
 `modulation`/`n`/edge count -- checked explicitly with before/after
 tensor snapshots, not just by code inspection. Full existing test suite
 still passes throughout.
+
+## 2026-09-14 (session 2) — Real full-corpus training, a real weight
+explosion bug, and a three-part fix for generation breaking under load
+
+**Real training run, not a sample:** `run_real_training.py` warm-starts
+from the existing checkpoint and trains on the full 5MB corpus (not the
+300K-byte samples used for the ablations above). Held-out next-byte
+accuracy: 88.6% -> 90.1% over successive real runs. Real, not assumed --
+this is meaningfully higher than the sample-scale numbers, confirming
+data volume (not just the mechanics columns) matters a lot here too.
+
+**Real bug found: `supervise.py`'s `supervised_step()` had no ceiling on
+weight growth.** Teaching back hundreds of thousands of real predictions
+meant extremely common byte pairs (","->" ", "."->" ") got reinforced
+so many times their weight reached **536** -- dwarfing frozen edges
+(fixed at 1.0) and breaking word-level generation completely (temperature
+sampling and even deterministic generation both collapsed to raw byte
+repetition). Root cause: `tick()`'s own Hebbian growth is naturally
+bounded by the `m_raw/(1+abs(m_raw))` saturation in message-passing;
+`supervised_step()` writes directly with no such saturation. Fixed:
+clamped to `graph.max_weight` (2.0). Verified: 1000 repeated teachings
+of the same edge now cap at exactly 2.0.
+
+**That fix alone was not enough -- a deeper, three-stage problem,
+found only by systematically tracing the WHOLE pipeline stage by stage
+(at explicit user direction, after two single-fix attempts each failed
+in a different way and it became clear ad-hoc patching was chasing
+symptoms downstream of each other):**
+
+1. **`tick()`'s message-passing had no memory of its own recent
+   history** -- a node's activation was just that tick's raw sum, so a
+   burst of now-strengthened edges could cascade from near-zero to full
+   strength in 1-2 ticks (measured: "the" stimulated at a stable 3.0
+   collapsed under common vowels reaching 10-16 within two ticks).
+   **Fix: `max_activation_rate`**, a leaky-bucket rate limiter on the
+   message-passing term only (`raw = min(raw, self.x + rate)`,
+   applied BEFORE external stimulus is added, so direct pokes are never
+   rate-limited, only emergent internal cascades). Verified this alone
+   does not weaken normal Hebbian learning (tracked edge still grew
+   ~4x over 100 ticks under the limiter, matching unlimited growth).
+
+2. **kWTA's `k` is one shared budget across the whole graph** -- with
+   hundreds of now-strengthened byte-to-byte edges, enough of them
+   climbing together (even individually rate-limited) could still fill
+   all `k=20` seats collectively, crowding out word-level nodes even
+   under direct, deliberate stimulation. **Fix: `split_sparsity_at`**
+   -- splits the top-k selection into two fully independent pools
+   (bytes 0-255, everything word-level 256+), each with its own quota,
+   so byte-level volume can never take a word-level seat regardless of
+   how many byte pathways are reinforced. Logic factored into a shared
+   `_topk_select()` helper so both pools use identical, already-tested
+   selection code.
+
+3. **`decode()` has its OWN, completely separate shared budget** (a
+   flat top-16 candidate cap) that neither of the above touches --
+   found only by systematically tracing the exact same scenario through
+   every stage rather than testing end-to-end output alone. A tiled word
+   node could win its own kWTA seat and STILL get pushed out of
+   `decode()`'s ranked candidate list by enough individually
+   high-scoring byte candidates, especially in later steps of a
+   sequence where the cascade has had more ticks to broaden (measured:
+   "the" survived kWTA with activation 4.83 -- higher than the working
+   first ARTICLE slot's 4.61 -- yet still failed to reach the candidate
+   list, because more DISTINCT bytes had crossed high-score thresholds
+   by that point in the sequence). **Fix: `decode(..., split_cap=True)`**
+   -- same principle one layer up: tiled candidates get their own
+   reserved half of the cap. Opt-in, default-off (existing callers
+   unaffected); `sequence.py` opts in explicitly since that's the one
+   pathway that needs it.
+
+**Systematic verification, not spot-checks:** built one script that
+traces every stage (kWTA activation after seed ticks, after step ticks,
+decode candidate membership, final output) across all four combinations
+(no fixes / rate-limit only / split-budget only / both together) on the
+IDENTICAL reconstructed broken scenario. This is what actually revealed
+neither single fix was sufficient and both were required together --
+testing them one at a time in isolation had made each individually look
+like a dead end. Only after adding the third fix (decode's own cap) did
+the full 6-slot sequence reach 6/6 role matches across 8 seeds, both
+temperature=0 and temperature=0.3, with 0 frozen edges disturbed --
+verified with explicit before/after tensor snapshots each time, and the
+real graph.json restored from backup after every failed attempt before
+trying the next fix, so no broken intermediate state was ever left
+persisted.
+
+**Final real result, persisted:** graph.json now reflects a real,
+complete training + teach-back cycle against the full corpus (439,251
+edges reinforced, head at 90.1% held-out accuracy) with generation fully
+working: `['the', 'choices', 'eats', 'under', 'the', 'existence']` --
+6/6 grammar-correct, real vocabulary, real trained structure. Full test
+suite passes.

@@ -79,7 +79,12 @@ def generate_sequence(graph, prompt_nodes, grammar=None, max_len=12,
         for _ in range(step_ticks):
             graph.tick(external_input=stim, temperature=temperature)
 
-        result = decode(graph)
+        # split_cap=True: reserve tiled (word-level) candidates their
+        # own share of decode()'s cap, so heavy byte-level activity
+        # (e.g. after teaching a trained head's predictions back into
+        # the graph) can't crowd a real word candidate out of the list
+        # -- found necessary by testing, 2026-09-14.
+        result = decode(graph, split_cap=True)
         if result["status"] in ("silence", "suspend"):
             trace.append({"step": step, "status": result["status"], "picked": None,
                           "expected_role": expected_role})
