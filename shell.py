@@ -8,8 +8,8 @@ import json
 import torch
 from graph import ESGRGraph
 from fact_gate import FactGate
-from byte_identity import wire_byte_identity
-from word_structure import wire_word_structure
+from byte_identity import wire_byte_identity, CATEGORY_OFFSET, CATEGORY_NAMES
+from word_structure import wire_word_structure, ROLE_OFFSET, ROLE_NAMES
 from decode import decode
 from sequence import generate_sequence, DEFAULT_GRAMMAR, GRAMMARS
 
@@ -73,6 +73,7 @@ tick [n=1]
 propose <name-or-int>
 confirm <name-or-int> <name-or-int>
 reject <name-or-int> <name-or-int>
+auto [on|off]  (with no arg, prints current state; on = sustained-trust candidates confirm themselves)
 say
 status
 tiles
@@ -101,6 +102,20 @@ def main():
     gate = FactGate(graph, json_path=DEFAULT_PATH)
     last_info = None
     poked_since_load = set()
+
+    def report_auto_confirms(new_indices):
+        # Silent when auto_confirm is off, so existing manual-confirm
+        # workflows see no new output at all. Checks graph.confirmed
+        # directly rather than assuming every new proposal got auto-
+        # confirmed — a proposal below auto_confirm_min_tau is left for
+        # a human, and stays silent here too.
+        if not gate.auto_confirm or not new_indices:
+            return
+        for i in new_indices:
+            if not bool(graph.confirmed[i]):
+                continue
+            s, d = int(graph.src[i]), int(graph.dst[i])
+            print(f"auto-confirmed: {TILES_REV.get(s, s)} -> {TILES_REV.get(d, d)}")
 
     for line in sys.stdin:
         parts = line.strip().split()
@@ -131,13 +146,27 @@ def main():
             stim[node] = STIM_VALUE
             for _ in range(n_ticks):
                 last_info = graph.tick(external_input=stim)
+                report_auto_confirms(gate.step())
             print_say(decode(graph), poked_since_load)
 
         elif cmd == "tick":
             n = int(args[0]) if args else 1
             for _ in range(n):
                 last_info = graph.tick(external_input=None)
+                report_auto_confirms(gate.step())
             print(f"ticked {n}")
+
+        elif cmd == "auto":
+            if not args:
+                print("on" if gate.auto_confirm else "off")
+            elif args[0] == "on":
+                gate.auto_confirm = True
+                print("auto-confirm on — sustained-trust candidates confirm themselves, no human step")
+            elif args[0] == "off":
+                gate.auto_confirm = False
+                print("auto-confirm off")
+            else:
+                print("usage: auto <on|off>")
 
         elif cmd == "propose":
             src = resolve(args[0])
@@ -188,15 +217,32 @@ def main():
             if name in TILES:
                 print(f"already {name} {TILES[name]}")
             else:
+                # Must exclude the category and role node ranges too, not
+                # just existing tiles.json values — real bug found by
+                # testing: the old version checked TILES.values() only,
+                # so the very next tile call would silently overwrite the
+                # NOUN role hub (275), then VERB, ARTICLE, PRONOUN,
+                # PREPOSITION, ADJECTIVE in turn, before ever reaching a
+                # genuinely free node.
                 used = set(TILES.values())
+                used.update(range(CATEGORY_OFFSET, CATEGORY_OFFSET + len(CATEGORY_NAMES)))
+                used.update(range(ROLE_OFFSET, ROLE_OFFSET + len(ROLE_NAMES)))
                 node = 274
                 while node in used:
                     node += 1
+                if node >= graph.n:
+                    # graph is full -- grow it a real node instead of
+                    # refusing. Fixes the hard n_nodes ceiling: the graph
+                    # can now make itself bigger when it runs out of room.
+                    old_n = graph.n
+                    node = graph.grow(1)[0]
+                    print(f"graph was full (n={old_n}) -- grew to n={graph.n}, new node {node}")
                 TILES[name] = node
                 TILES_REV[node] = name
                 with open("tiles.json", "w") as f:
                     json.dump(TILES, f, indent=2)
-                print(f"tiled {name} {node}")
+                wire_word_structure(graph)  # attach the new word's letters-in/role-out edges
+                print(f"tiled {name} {node} -- remember to `save` to persist the grown graph")
 
         elif cmd == "tiles":
             print(TILES)
@@ -220,6 +266,7 @@ def main():
                     poked_since_load.add(node)
                 for _ in range(4):
                     last_info = graph.tick(external_input=stim)
+                    report_auto_confirms(gate.step())
                 print_say(decode(graph), poked_since_load)
                 fired = [name for name, node in TILES.items() if graph.x[node] > 0]
                 print("fired:", " ".join(fired))
@@ -265,6 +312,7 @@ def main():
                     poked_since_load.add(node)
                 for _ in range(4):
                     last_info = graph.tick(external_input=stim)
+                    report_auto_confirms(gate.step())
             print(f"trained {reps} reps over {len(sentences)} sentences")
 
         elif cmd == "quit":

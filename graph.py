@@ -19,7 +19,7 @@ TAU_TRUST_THRESHOLD = 0.3
 class ESGRGraph:
     def __init__(self, n_nodes=8192, mean_out_degree=12, active_fraction=0.05,
                  eta=1e-2, lam=1e-3, seed=0, max_activation=5.0, max_weight=2.0,
-                 use_hard_clip=False):
+                 use_hard_clip=False, modulation_decay=0.97):
         g = torch.Generator().manual_seed(seed)
         self.n = n_nodes
         self.active_fraction = active_fraction
@@ -64,11 +64,132 @@ class ESGRGraph:
         self.x = torch.zeros(n_nodes)
         self.tick_count = 0
 
+        # Three-factor (reward-modulated) Hebbian plasticity. Plain
+        # Hebbian (below) can't tell a meaningful co-firing pattern from
+        # a coincidental one — it strengthens both identically. modulation
+        # is a third, per-node input to the weight update, starting
+        # neutral (1.0) everywhere, that FactGate nudges via reward()/
+        # punish() when an edge actually gets confirmed or rejected. A
+        # graph nobody ever confirms/rejects behaves byte-for-byte like
+        # the plain two-factor rule — this is additive, not a replacement.
+        self.modulation = torch.ones(n_nodes)
+        self.modulation_decay = modulation_decay
+
     def find_edge(self, src, dst):
         return self.edge_index.get((src, dst))
 
+    def grow(self, n_new_nodes, mean_out_degree=8, seed=None):
+        """Add n_new_nodes fresh nodes to the graph at runtime -- the
+        thing that was architecturally impossible before: n was fixed
+        forever at construction. Every existing node id, edge id, and
+        piece of frozen/confirmed state is untouched; new edges are only
+        ever APPENDED, never inserted, so no existing edge index moves
+        and the "frozen edges never move" invariant (test_integration_
+        stress.py) holds automatically.
+
+        New nodes get the same random-topology OUTGOING wiring every
+        original node got at construction (so they're ordinary,
+        learnable graph citizens, not dead weight) -- but deliberately
+        get no automatic INCOMING wiring from old nodes. For the actual
+        use case this exists for (shell.py's `tile` command growing a
+        node for a brand-new word), the real, meaningful connectivity is
+        the caller then adding via add_fixed_edge()/wire_word_structure()
+        -- letters in, role out -- exactly how all 31 existing word
+        tiles work, not through random topology.
+
+        Returns the list of new node ids.
+        """
+        g_gen = torch.Generator().manual_seed(seed) if seed is not None else torch.Generator()
+        old_n = self.n
+        new_n = old_n + n_new_nodes
+
+        self.x = torch.cat([self.x, torch.zeros(n_new_nodes)])
+        self.theta = torch.cat([self.theta, torch.full((n_new_nodes,), 0.3)])
+        self.modulation = torch.cat([self.modulation, torch.ones(n_new_nodes)])
+
+        pairs = set(self.edge_index.keys())
+        src_list, dst_list = [], []
+        for u in range(old_n, new_n):
+            degree = max(1, int(torch.normal(
+                torch.tensor(float(mean_out_degree)), torch.tensor(3.0), generator=g_gen).item()))
+            targets = torch.randint(0, new_n, (degree * 2,), generator=g_gen).tolist()
+            added = 0
+            for v in targets:
+                if v == u or (u, v) in pairs:
+                    continue
+                pairs.add((u, v))
+                src_list.append(u)
+                dst_list.append(v)
+                added += 1
+                if added >= degree:
+                    break
+
+        n_new_edges = len(src_list)
+        start_idx = self.src.shape[0]
+        self.src = torch.cat([self.src, torch.tensor(src_list, dtype=torch.long)])
+        self.dst = torch.cat([self.dst, torch.tensor(dst_list, dtype=torch.long)])
+        self.w = torch.cat([self.w, torch.empty(n_new_edges).uniform_(0.0, 0.5, generator=g_gen)])
+        self.tau = torch.cat([self.tau, torch.full((n_new_edges,), 0.5)])
+        self.c = torch.cat([self.c, torch.empty(n_new_edges).uniform_(0.01, 0.1, generator=g_gen)])
+        self.last_use = torch.cat([self.last_use, torch.full((n_new_edges,), -1000)])
+        self.frozen = torch.cat([self.frozen, torch.zeros(n_new_edges, dtype=torch.bool)])
+        self.confirmed = torch.cat([self.confirmed, torch.zeros(n_new_edges, dtype=torch.bool)])
+        self.rejected = torch.cat([self.rejected, torch.zeros(n_new_edges, dtype=torch.bool)])
+        self.suspended = torch.cat([self.suspended, torch.zeros(n_new_edges, dtype=torch.bool)])
+        for i, (s, d) in enumerate(zip(src_list, dst_list)):
+            self.edge_index[(s, d)] = start_idx + i
+
+        self.n = new_n
+        return list(range(old_n, new_n))
+
     def register_contradiction(self, i, j):
         self.contradiction_pairs.append((i, j))
+
+    def add_learnable_edge(self, src, dst, w=0.1, tau=0.5):
+        """Create a real, ORDINARY (non-frozen) edge between two existing
+        nodes if one doesn't already exist -- the gap add_fixed_edge()
+        can't fill, since it always freezes. Needed for supervised
+        correction (see supervise.py): pushing weight toward the real
+        next word in real text requires an edge to push, even when
+        nothing wired one there by chance. Append-only, same as grow()
+        and add_fixed_edge() -- never disturbs an existing edge index."""
+        existing = self.find_edge(src, dst)
+        if existing is not None:
+            return existing
+        i = self.src.shape[0]
+        self.src = torch.cat([self.src, torch.tensor([src])])
+        self.dst = torch.cat([self.dst, torch.tensor([dst])])
+        self.w = torch.cat([self.w, torch.tensor([w])])
+        self.tau = torch.cat([self.tau, torch.tensor([tau])])
+        self.c = torch.cat([self.c, torch.tensor([0.05])])
+        self.last_use = torch.cat([self.last_use, torch.tensor([-1000])])
+        self.frozen = torch.cat([self.frozen, torch.tensor([False])])
+        self.confirmed = torch.cat([self.confirmed, torch.tensor([False])])
+        self.rejected = torch.cat([self.rejected, torch.tensor([False])])
+        self.suspended = torch.cat([self.suspended, torch.tensor([False])])
+        self.edge_index[(src, dst)] = i
+        return i
+
+    def reward(self, node_ids, amount=0.3):
+        """Bump modulation up for these nodes — called by FactGate when
+        an edge touching them gets confirmed. Nudges nearby Hebbian
+        updates to trust similar future co-firing more, for a while.
+        amount=0.3 and modulation_decay=0.97 (half-life ~23 ticks) are
+        tuned against the real corpus-mined training data, not guessed:
+        0.5 nearly pinned modulation at its 3.0 ceiling the moment
+        several real confirmations landed close together (14 edges in
+        the live graph.json were already primed above the confirm
+        threshold, and cleared it within the first few ticks of running
+        step() for the first time), which collapses the signal to just
+        "maxed or not." 0.3 peaked at 1.9 under the same real event,
+        leaving headroom for the signal to stay graduated."""
+        idx = torch.tensor(node_ids, dtype=torch.long)
+        self.modulation[idx] = torch.clamp(self.modulation[idx] + amount, max=3.0)
+
+    def punish(self, node_ids, amount=0.3):
+        """Mirror of reward() — called by FactGate.reject()."""
+        idx = torch.tensor(node_ids, dtype=torch.long)
+        self.modulation[idx] = torch.clamp(self.modulation[idx] - amount, min=0.0)
 
     def propose(self, src):
         """Miss-propose only. Read-only — never sets confirmed/rejected,
@@ -87,6 +208,13 @@ class ESGRGraph:
         return {"status": "MISS", "edges": candidates[:5]}
 
     def add_fixed_edge(self, src, dst, weight=1.0, trust=1.0, confirmed=True):
+        if src >= self.n or dst >= self.n:
+            # Fail loudly and immediately, not later as a confusing
+            # IndexError inside tick() -- found by testing: tiles.json
+            # can now reference nodes from a grown, larger graph, and a
+            # smaller fresh graph silently accepted an edge to a node it
+            # doesn't have, only crashing on the next tick().
+            raise ValueError(f"add_fixed_edge({src},{dst}): node id >= graph.n ({self.n})")
         if (src, dst) in self.edge_index:
             # Coincidental collision with a pre-existing random-topology
             # edge (category nodes are valid random targets too) — must
@@ -149,7 +277,16 @@ class ESGRGraph:
         # hundreds of near-equal near-zero entries, found by testing:
         # temperature=0.8 over the full field produced near-uniform
         # random selection and stopped hitting any tile at all.
-        pool_size = min(x.shape[0], max(k * 3, int((x > 0).sum().item())))
+        # Real bug found by testing (2026-09-13, after vocabulary growth
+        # 31->130 words): this was `max(k*3, positive_count)`, the exact
+        # opposite of what the comment above describes. It happened to
+        # look correct on the old, sparser 300-node graph, where
+        # positive_count rarely exceeded k*3 (so max() and min() agreed
+        # by coincidence) -- but on the larger, denser real graph,
+        # positive_count routinely hit 326/399, and max() let the
+        # sampling pool balloon to 326 candidates, diluting the softmax
+        # exactly the way this function's docstring warns against.
+        pool_size = min(x.shape[0], min(k * 3, max(1, int((x > 0).sum().item()))))
         pool_vals, pool_idx = torch.topk(x, pool_size)
         probs = torch.softmax(pool_vals / temperature, dim=0)
         chosen = torch.multinomial(probs, min(k, pool_size), replacement=False)
@@ -181,7 +318,12 @@ class ESGRGraph:
 
         x_u = x[self.src]
         x_v = x_new[self.dst]
-        delta_w = self.eta * x_u * x_v - self.lam * self.w
+        # mod is 1.0 for every edge until reward()/punish() has touched
+        # src or dst, so this multiply is a no-op (identical to the old
+        # two-factor rule) unless something has actually been confirmed
+        # or rejected nearby.
+        mod = 0.5 * (self.modulation[self.src] + self.modulation[self.dst])
+        delta_w = self.eta * mod * x_u * x_v - self.lam * self.w
         delta_w = torch.where(self.frozen, torch.zeros_like(delta_w), delta_w)
         w_raw = self.w + delta_w
         if self.use_hard_clip:
@@ -258,12 +400,18 @@ class ESGRGraph:
             nan_count += 1
         has_nan = nan_count > 0
 
+        # modulation relaxes back toward neutral (1.0) every tick, so a
+        # reward/punishment is a temporary nudge to nearby learning, not
+        # a permanent multiplier.
+        self.modulation = 1.0 + (self.modulation - 1.0) * self.modulation_decay
+
         self.x = x_new
         self.tick_count += 1
         return {"E_drift": e_drift, "E_wire": e_wire, "E_fire": e_fire, "E_contr": e_contr_total,
                 "active_fraction": e_fire / self.n, "mean_trust": self.tau.mean().item(),
                 "clip_hits": clip_hits, "nan": has_nan, "nan_count": nan_count,
-                "sat_hits": sat_hits, "w_norm_fires": w_norm_fires, "newly_suspended": newly_suspended}
+                "sat_hits": sat_hits, "w_norm_fires": w_norm_fires, "newly_suspended": newly_suspended,
+                "mean_modulation": self.modulation.mean().item()}
 
     def save_json(self, path):
         data = {
@@ -271,6 +419,7 @@ class ESGRGraph:
             "active_fraction": self.active_fraction,
             "max_activation": self.max_activation, "max_weight": self.max_weight,
             "use_hard_clip": self.use_hard_clip,
+            "modulation": self.modulation.tolist(), "modulation_decay": self.modulation_decay,
             "contradiction_pairs": self.contradiction_pairs,
             "edges": [
                 {"src": int(s), "dst": int(d), "w": float(w), "tau": float(t), "c": float(c),
@@ -295,6 +444,10 @@ class ESGRGraph:
         g.active_fraction = data["active_fraction"]
         g.max_activation, g.max_weight = data["max_activation"], data["max_weight"]
         g.use_hard_clip = data["use_hard_clip"]
+        # older saves predate modulation -- default to neutral (1.0) so
+        # they load exactly as before, no behavior change on old files.
+        g.modulation = torch.tensor(data["modulation"]) if "modulation" in data else torch.ones(data["n"])
+        g.modulation_decay = data.get("modulation_decay", 0.97)
         g.contradiction_pairs = [tuple(p) for p in data["contradiction_pairs"]]
         edges = data["edges"]
         g.src = torch.tensor([e["src"] for e in edges], dtype=torch.long)

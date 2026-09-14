@@ -85,3 +85,97 @@ nothing has regressed since 2026-09-12:
   generation trace)
 
 No code changes made this session — documentation only.
+
+## 2026-09-13 — Reward-modulated learning, dynamic growth, real vocabulary
+expansion 31 → 130 words, four bugs found and fixed
+
+**Reward-modulated (three-factor) Hebbian learning.** `ESGRGraph.modulation`
+(per-node, neutral=1.0) now scales the Hebbian weight update
+(`eta*mod*x_u*x_v - lambda*w`); `graph.reward()`/`graph.punish()`, called
+from `FactGate.confirm()`/`reject()`, nudge it. Neutral (mod=1.0, i.e. the
+old formula exactly) unless something's actually been confirmed/rejected
+nearby — verified byte-identical numbers on the existing sanity test.
+Tuned against real data, not guessed: replayed the real corpus-mined
+training data and the real graph's own already-trained state; amount=0.5
+nearly pinned modulation at its ceiling the moment several real
+confirmations landed close together, so tuned down to amount=0.3,
+modulation_decay=0.97 (half-life ~23 ticks).
+
+**Dynamic node growth (`ESGRGraph.grow()`) — the 300-node ceiling is no
+longer architecturally fixed.** Append-only: new nodes + random-topology
+edges, verified 0 frozen edges disturbed by growth. Wired into `tile`.
+Also added `add_learnable_edge()` — an ordinary (non-frozen) edge can now
+be created at runtime too, not just frozen ones via `add_fixed_edge`.
+
+**`FactGate(auto_confirm=True)`** — an edge that clears sustained trust can
+confirm itself with no human call, gated by a stricter
+`auto_confirm_min_tau=0.95` floor than the normal 0.8 propose threshold.
+Off by default; deliberately overrides "not a fact until confirm()" at
+explicit user request.
+
+**`supervise.py` — built, measured honestly, real negative result.** A
+local, single-hop, ground-truth-corrected rule (not backprop — pushes
+toward the real next word from real text even when it isn't currently
+active). Measured against a proper held-out split of real corpus pairs
+AND against a trivial "per-context majority vote" baseline: the graph
+mechanism did NOT beat plain counting (51.8% vs 54.8% at the time).
+Root cause: only 6/31 words ever appeared as a training "context" in real
+adjacent-word pairs — severe vocabulary-driven data sparsity, not a flaw
+in the rule. Widening the adjacency-gap tolerance (1/3/8/20 tried) made it
+worse, not better (plateaued at 11/31 context words, baseline gap widened).
+Left in the repo, working and honestly documented, currently unused
+downstream.
+
+**Vocabulary expansion 31 → 130 real words (`expand_vocab.py`), which
+fixed the actual sparsity problem `supervise.py` couldn't:** mined the top
+100 most-common real words in the corpus not already tiled, tiled via the
+same free-slot-then-`grow()` path as the shell's `tile` command, extended
+`word_structure.ROLE_MAP` with confident-only role assignments (genuinely
+ambiguous words left without a role, same "real none" convention as the
+original 31). Real coverage: 6/31 (19%) words with real training signal →
+99/130 (76%). `graph.json`: 300→399 nodes, 2,667→4,244 edges.
+
+**`grammar_extra.py` — four new hand-coded English mechanics dimensions**
+beyond the original 6 syntactic roles, at explicit user direction ("there
+is more language mechanics in the English system") after the `supervise.py`
+finding: **TENSE** (PAST/PRESENT), **NUMBER** (SINGULAR/PLURAL, "you" left
+out — real English ambiguity), **ANIMACY** (ANIMATE/INANIMATE),
+**DISCOURSE** (AFFIRM/NEGATE/NEGATOR — finally gives "yes"/"no"/"not" a
+real grammatical home). Same frozen-edge mechanism as `word_structure.py`;
+uses `grow()` for hub nodes. Wired and queryable, not yet consumed by
+`sequence.py`/`decode.py`.
+
+**Four real bugs found and fixed, all verified against the full test
+suite after each fix:**
+
+1. **Tile/role-hub collision.** `tile`'s free-node search checked only
+   `tiles.json`, not the category/role ranges — the next `tile` call
+   would have silently overwritten the NOUN role hub, then the rest.
+2. **"space" name collision.** The real English word "space" is also the
+   reserved tiles.json key for the space *character* (byte 32) — mining
+   logic excluded that key by name from "already have it," so the real
+   word got mined as new and silently overwrote the character tile. Fixed
+   the exclusion set (now ALL existing keys) and restored the value.
+3. **Silent out-of-bounds edges.** `add_fixed_edge()` never validated
+   `src`/`dst < graph.n` — a smaller graph given the (now bigger)
+   `tiles.json` would silently create an edge to a nonexistent node, only
+   crashing later, confusingly, inside `tick()`. Now raises immediately;
+   `wire_word_structure()` skips what doesn't fit instead of relying on
+   that.
+4. **Latent min/max bug in `_enforce_sparsity`'s temperature path,
+   exposed (not caused) by the vocabulary growth.**
+   `pool_size = min(n, max(k*3, positive_count))` — the function's own
+   docstring says the pool should be the generous multiple of k, OR every
+   positive value if *fewer* — i.e. `min`, not `max`. It looked correct on
+   the old sparse graph (positive_count rarely exceeded k*3, so the two
+   operators agreed by coincidence); on the bigger, denser real graph,
+   positive_count routinely hit 326/399, ballooning the softmax pool and
+   collapsing temperature-based generation to 1/6 role matches across
+   10/10 seeds tested. Fixed to `min`; reverified 10/10 seeds back to
+   6/6. Worth extra scrutiny on similar `max()`/`min()` code whenever n or
+   vocabulary size changes again — this class of bug is invisible at the
+   scale it was written and tested against.
+
+Full test suite (`test_graph_sanity.py`, `test_fact_gate.py`,
+`test_sequence.py`, `test_integration_stress.py` against the real,
+now-expanded `graph.json`) passes after every fix.

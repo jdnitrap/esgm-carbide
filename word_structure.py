@@ -49,6 +49,41 @@ ROLE_MAP = {
     "it": "PRONOUN",
     "we": "PRONOUN",
     "they": "PRONOUN",
+
+    # 2026-09-13: the top 100 real words (by real corpus frequency) not
+    # already in the original 31 -- mined the same way the original
+    # vocabulary was chosen, see EXPERIMENT_LOG.md. Assigned only where
+    # confident regardless of context; genuinely ambiguous ones (and,
+    # that, but, yet, how, both, than, constantly, only, simultaneously,
+    # present, study, enabling) are deliberately left with no role here,
+    # same "real none state" convention as the original 31.
+    "of": "PREPOSITION", "to": "PREPOSITION", "through": "PREPOSITION",
+    "with": "PREPOSITION", "from": "PREPOSITION", "as": "PREPOSITION",
+    "across": "PREPOSITION", "for": "PREPOSITION", "at": "PREPOSITION",
+    "by": "PREPOSITION",
+    "an": "ARTICLE",
+    "our": "PRONOUN", "us": "PRONOUN", "their": "PRONOUN", "what": "PRONOUN",
+    "these": "PRONOUN", "ourselves": "PRONOUN", "itself": "PRONOUN",
+    "its": "PRONOUN", "each": "PRONOUN",
+    "human": "NOUN", "world": "NOUN", "life": "NOUN", "patterns": "NOUN",
+    "stories": "NOUN", "billions": "NOUN", "knowledge": "NOUN", "power": "NOUN",
+    "universe": "NOUN", "consciousness": "NOUN", "history": "NOUN",
+    "percent": "NOUN", "revolution": "NOUN", "learning": "NOUN",
+    "information": "NOUN", "millions": "NOUN", "ocean": "NOUN", "mind": "NOUN",
+    "experience": "NOUN", "existence": "NOUN", "choices": "NOUN",
+    "question": "NOUN", "beliefs": "NOUN", "truth": "NOUN", "meaning": "NOUN",
+    "matter": "NOUN", "philosophy": "NOUN", "physics": "NOUN", "effect": "NOUN",
+    "reality": "NOUN", "experiment": "NOUN", "particle": "NOUN", "years": "NOUN",
+    "story": "NOUN", "time": "NOUN", "space": "NOUN", "literature": "NOUN",
+    "era": "NOUN", "characters": "NOUN", "language": "NOUN", "reader": "NOUN",
+    "data": "NOUN", "networks": "NOUN", "times": "NOUN",
+    "are": "VERB", "has": "VERB", "was": "VERB", "becomes": "VERB",
+    "reveals": "VERB", "does": "VERB", "live": "VERB", "lead": "VERB",
+    "make": "VERB", "know": "VERB", "remain": "VERB",
+    "vast": "ADJECTIVE", "ordinary": "ADJECTIVE", "own": "ADJECTIVE",
+    "deep": "ADJECTIVE", "complex": "ADJECTIVE", "same": "ADJECTIVE",
+    "unexamined": "ADJECTIVE", "classical": "ADJECTIVE", "dark": "ADJECTIVE",
+    "great": "ADJECTIVE", "natural": "ADJECTIVE", "written": "ADJECTIVE",
 }
 
 ROLE_LABELS = {ROLE_OFFSET + i: name for i, name in enumerate(ROLE_NAMES)}
@@ -65,6 +100,12 @@ def wire_word_structure(graph, tiles_path="tiles.json"):
     n_letter_edges = 0
     n_role_edges = 0
     for word, node in word_tiles.items():
+        if node >= graph.n:
+            # tiles.json can reference a bigger, grown graph than the one
+            # passed in here (e.g. a fresh, small test graph) -- skip
+            # what doesn't fit rather than crash; same "real, valid
+            # skip" convention as a word with no role.
+            continue
         for ch in set(word):
             byte_val = ord(ch)
             graph.add_fixed_edge(byte_val, node, weight=1.0, trust=1.0)

@@ -38,10 +38,23 @@ projects (see
 ## What it is today
 
 - **`graph.py`** — `ESGRGraph` core: `tick()` / Hebbian update / kWTA /
-  `save_json()` / `load_json()`.
+  `save_json()` / `load_json()`; also reward-modulated (three-factor)
+  plasticity (`reward()`/`punish()`, tuned amount=0.3, decay=0.97) and
+  dynamic runtime growth (`grow()`, `add_learnable_edge()`) — the
+  node-count ceiling is no longer architecturally fixed.
 - **`fact_gate.py`, `byte_identity.py`, `word_structure.py`,
-  `decode.py`** — the propose/confirm pipeline, byte- and word-level
-  structural scaffolding, and quiet-mouth decoding.
+  `decode.py`** — the propose/confirm pipeline (optionally
+  `auto_confirm=True`, off by default), byte- and word-level structural
+  scaffolding, and quiet-mouth decoding.
+- **`grammar_extra.py`** — four more hand-coded English mechanics
+  dimensions beyond the original 6 syntactic roles: TENSE, NUMBER,
+  ANIMACY, DISCOURSE. Same frozen-edge pattern as `word_structure.py`;
+  wired and queryable, not yet consumed by generation.
+- **`supervise.py`** — a local, single-hop, ground-truth-corrected
+  learning rule (not backprop). Built and honestly measured against real
+  data; didn't beat a trivial counting baseline at the vocabulary size it
+  was tested against (see `EXPERIMENT_LOG.md`, 2026-09-13). Kept in the
+  repo, currently unused downstream.
 - **`sequence.py`** — autoregressive text generation: one token per
   step, driven by **actively querying** `words_with_role()` for the
   currently-expected grammar slot and stimulating that pool directly.
@@ -52,12 +65,17 @@ projects (see
 - **`mine_and_train.py` / `train_on_corpus.py`** — real word-level
   training: mines the actual 5MB Carbide corpus
   (`carbide/carbide_training_dataset.txt`) for genuine adjacent-word
-  runs of the vocabulary (22,081 found) and trains on those directly,
+  runs of the vocabulary and trains on those directly,
   in addition to an earlier synthetic 8-sentence pass and an earlier
   5M-byte byte-level-only pass.
-- **`graph.json`** — the real accumulated graph state (n=300), trained
+- **`expand_vocab.py`** — mines the corpus for the most common real
+  words not yet tiled and adds them via the same free-slot-then-`grow()`
+  path the shell's `tile` command uses. Used once (2026-09-13) to expand
+  31 → 130 words; real corpus coverage (words that ever get real
+  training signal) went from 19% to 76%.
+- **`graph.json`** — the real accumulated graph state (n=399), trained
   on the full corpus both byte-level and word-level.
-- **`tiles.json`** — named-node vocabulary, 31 words, 5 grammar
+- **`tiles.json`** — named-node vocabulary, 130 words, 5 grammar
   templates (`simple`, `with_adjective`, `prepositional`,
   `pronoun_subject`, `pronoun_object`).
 - **`STANDING_RULES.md`** — originally a governance doc ("Grok
@@ -79,9 +97,10 @@ separate, later, larger effort):
 - No bulk training run in the sense of optimizing toward a loss —
   Hebbian updates happen continuously, but there's been no large-scale
   "train until convergence" campaign.
-- Vocabulary is still small (31 words) by deliberate choice, not a
-  ceiling — hand-curated expansion was chosen over automatic
-  large-scale growth so far.
+- Vocabulary was 31 words by deliberate choice for a while, not a
+  ceiling — as of 2026-09-13 it's 130, and the node-count ceiling that
+  used to cap it is gone (`ESGRGraph.grow()`); further growth is a
+  `expand_vocab.py` run away, not a redesign.
 
 **Natural next directions**, given what's built:
 - Scale training further now that the tau-decay floor bug (see
@@ -89,9 +108,13 @@ separate, later, larger effort):
   training runs longer than the ~5M ticks where the bug first
   appeared, so larger runs should now be safe to attempt.
 - Expand vocabulary/grammar templates further, following the same
-  "mine real adjacent-word runs from a real corpus" approach that
-  worked for the current 31-word vocabulary rather than hand-writing
-  more synthetic examples.
+  "mine real adjacent-word runs from a real corpus" approach used for
+  the 31→130 word expansion, rather than hand-writing more synthetic
+  examples. 517 more real distinct words are sitting in the same 5MB
+  corpus, untapped.
+- Feed the new `grammar_extra.py` dimensions (TENSE/NUMBER/ANIMACY/
+  DISCOURSE) into `sequence.py`/`decode.py` — wired and queryable today,
+  not yet used to constrain generation (e.g. tense agreement).
 - The known architectural tradeoff (see "How it compares" below) means
   ESGR is unlikely to ever match gradient-descent systems at
   *discovering new structure* — its comparative advantage is
