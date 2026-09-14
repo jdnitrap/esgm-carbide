@@ -48,7 +48,54 @@ WORD_DIMS = [
     ("MORPHOLOGY", MORPHOLOGY_NAMES, "MORPHOLOGY"),
 ]
 WORD_TAG_DIM = sum(len(names) + 1 for _, names, _ in WORD_DIMS)  # +1 = a real "none" bucket per dimension
-N_COLUMNS = BYTE_COLUMNS_DIM + WORD_TAG_DIM
+
+# 2026-09-14: a TURN column, at explicit user direction ("the graph
+# needs more columns for more dimensions") after heavy dialogue
+# fine-tuning overfit on too little data. Same "deterministic fact
+# given for free, never learned" category as byte_identity.py's
+# is_alpha/is_punct/etc -- computed by a pure forward scan for the
+# literal "Q:"/"A:" markers (see turn_tags() below), not stored as
+# graph edges: unlike ROLE/TENSE, a turn state isn't a property of a
+# specific known word or byte value, it's a property of POSITION in
+# one particular byte stream, so there's no natural graph node to hang
+# it on -- same reasoning as why word_at_position() is a pure function
+# over byte_seq rather than a graph lookup.
+TURN_NAMES = ["QUESTION", "ANSWER"]
+TURN_TAG_DIM = len(TURN_NAMES) + 1  # +1 = "none" bucket, real state outside any Q:/A: pair
+
+# 2026-09-14, same day, second addition: user pushed back that TURN
+# alone isn't "all of prompt mechanics" -- correct. This is the other
+# well-evidenced piece: WHICH KIND of question is being asked/answered,
+# detected from the real opening-word patterns actually used in
+# dialogue_corpus.txt (What/Who/Where/When/Why/How/Which = WH-question,
+# Can/Do/Does/Is/Are/Will/Would = yes-no question, Tell/Explain/Describe
+# = imperative request). Directly targets the specific measured failure
+# (test_dialogue.py: answers are grammatically fine but topically
+# unrelated to the question -- "what is a black hole" answered with a
+# fact about the mind-body connection) by giving the model, for free,
+# the ONE signal that connects "what kind of question" to "what kind of
+# answer is expected" -- the same role ROLE/TENSE play for grammar.
+#
+# Deliberately NOT included: sentiment, politeness/register, or a full
+# declarative/imperative/exclamatory sentence-type beyond what's above
+# -- none of those are exercised by the real data (dialogue_corpus.txt
+# has no exclamations, no register variation), so adding them now would
+# be speculative, not evidence-based -- the same discipline that held
+# for SYNTAX/MORPHOLOGY (validated with a real ablation before being
+# trusted) applies here: build what the real data justifies, not
+# everything imaginable.
+QUESTION_FORM_NAMES = ["WH_WHAT", "WH_WHO", "WH_WHERE", "WH_WHEN", "WH_WHY",
+                        "WH_HOW", "WH_WHICH", "YES_NO", "IMPERATIVE"]
+QUESTION_FORM_FIRST_WORD = {
+    "what": "WH_WHAT", "who": "WH_WHO", "where": "WH_WHERE", "when": "WH_WHEN",
+    "why": "WH_WHY", "how": "WH_HOW", "which": "WH_WHICH",
+    "can": "YES_NO", "do": "YES_NO", "does": "YES_NO", "is": "YES_NO",
+    "are": "YES_NO", "will": "YES_NO", "would": "YES_NO",
+    "tell": "IMPERATIVE", "explain": "IMPERATIVE", "describe": "IMPERATIVE",
+}
+QUESTION_FORM_TAG_DIM = len(QUESTION_FORM_NAMES) + 1  # +1 = "none" bucket
+
+N_COLUMNS = BYTE_COLUMNS_DIM + WORD_TAG_DIM + TURN_TAG_DIM + QUESTION_FORM_TAG_DIM
 
 
 def byte_columns(graph, byte_val):
@@ -111,11 +158,80 @@ def word_at_position(byte_seq, i, word_to_node, max_word_len):
     return None
 
 
+def turn_tags(byte_seq):
+    """One state per byte position (0=none, 1=question, 2=answer), by a
+    single deterministic left-to-right scan for the literal "Q:" and
+    "A:" markers, resetting to "none" at a blank line ("\\n\\n", the
+    real separator between pairs in dialogue_corpus.txt). Causal only
+    -- each position's state depends only on bytes at or before it, so
+    this is exactly as streaming-safe as word_at_position(). Text with
+    no Q:/A: markers at all (e.g. the plain essay corpus) stays "none"
+    throughout -- the real, honest default, not a guess."""
+    text = bytes(byte_seq)
+    n = len(text)
+    state = 0
+    out = [0] * n
+    for i in range(n):
+        pair = text[i:i + 2]
+        if pair == b"Q:":
+            state = 1
+        elif pair == b"A:":
+            state = 2
+        elif pair == b"\n\n":
+            state = 0
+        out[i] = state
+    return out
+
+
+def question_form_tags(byte_seq):
+    """One state per byte position: which QUESTION_FORM_NAMES category
+    (or None -> the "none" bucket) the CURRENT pair's question opened
+    with, detected from the real first word after each "Q:" marker.
+    Held through BOTH the question and its answer -- reset only at the
+    blank line between pairs, not at "A:" -- so the signal is present
+    exactly where it's actually needed: while the answer is being
+    generated, not just while the question is being read.
+
+    Causal: depends only on bytes at or before each position. Positions
+    inside the still-being-typed first word are the real "none" state
+    until that word is complete (a delimiter is seen) -- same
+    "commit to the best reading seen so far" rule as word_at_position().
+    """
+    text = bytes(byte_seq)
+    n = len(text)
+    out = [None] * n
+    state = None
+    collecting = False
+    word = ""
+    for i in range(n):
+        b = text[i]
+        ch = chr(b) if b < 128 else ""
+        if text[i:i + 2] == b"Q:":
+            state = None
+            collecting = True
+            word = ""
+        elif text[i:i + 2] == b"\n\n":
+            state = None
+            collecting = False
+            word = ""
+        elif collecting:
+            if ch.isalpha():
+                word += ch.lower()
+            elif word:
+                state = QUESTION_FORM_FIRST_WORD.get(word)
+                collecting = False
+        out[i] = state
+    return out
+
+
 def build_tag_table(graph, hub_ids, tiles, byte_seq):
     """Full (len(byte_seq), N_COLUMNS) tag tensor for one raw byte
     sequence: the 6 byte-level columns are always present; the 26
     word-level columns are present only at the exact byte where a real
-    tiled word completes, real "none" state everywhere else."""
+    tiled word completes, real "none" state everywhere else; the 3
+    turn columns (QUESTION/ANSWER/none) and 10 question-form columns
+    are present at every position, computed by turn_tags() and
+    question_form_tags()."""
     word_to_node = {k.lower(): v for k, v in tiles.items() if k not in ("A", "space", "newline")}
     max_len = max((len(w) for w in word_to_node), default=0)
     byte_tab = byte_columns_batch(graph)
@@ -123,8 +239,9 @@ def build_tag_table(graph, hub_ids, tiles, byte_seq):
     n = len(byte_seq)
     out = torch.zeros(n, N_COLUMNS)
     out[:, :BYTE_COLUMNS_DIM] = byte_tab[list(byte_seq)]
+    word_off = BYTE_COLUMNS_DIM
     none_offsets = []
-    off = BYTE_COLUMNS_DIM
+    off = word_off
     for _, names, _ in WORD_DIMS:
         none_offsets.append(off + len(names))
         off += len(names) + 1
@@ -133,7 +250,19 @@ def build_tag_table(graph, hub_ids, tiles, byte_seq):
     for i in range(n):
         word_node = word_at_position(byte_seq, i, word_to_node, max_len)
         if word_node is not None:
-            out[i, BYTE_COLUMNS_DIM:] = word_tag_features(graph, hub_ids, word_node)
+            out[i, word_off:word_off + WORD_TAG_DIM] = word_tag_features(graph, hub_ids, word_node)
+
+    turn_off = word_off + WORD_TAG_DIM
+    states = turn_tags(byte_seq)
+    for i, s in enumerate(states):
+        out[i, turn_off + s] = 1.0  # s=0 -> none bucket, s=1 -> QUESTION, s=2 -> ANSWER
+
+    qf_off = turn_off + TURN_TAG_DIM
+    qf_none_idx = len(QUESTION_FORM_NAMES)
+    qf_states = question_form_tags(byte_seq)
+    for i, form in enumerate(qf_states):
+        idx = QUESTION_FORM_NAMES.index(form) if form is not None else qf_none_idx
+        out[i, qf_off + idx] = 1.0
     return out
 
 

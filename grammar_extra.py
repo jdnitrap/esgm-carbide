@@ -56,11 +56,39 @@ ANIMACY_MAP = {
 # English grammar generally, they're just a DIFFERENT kind of category
 # (discourse particles / negation) than NOUN/VERB/etc. Giving them their
 # own dimension is the linguistically correct fix, not a patch onto ROLE.
-DISCOURSE_NAMES = ["AFFIRM", "NEGATE", "NEGATOR"]
+#
+# 2026-09-14: extended with real discourse-RELATION connectives, at
+# explicit user request to look up published research rather than
+# invent categories. Grounded in the Penn Discourse Treebank (PDTB),
+# the standard annotation framework for this exact phenomenon: its
+# four major semantic classes are TEMPORAL, CONTINGENCY, COMPARISON,
+# and EXPANSION, each signaled by real, well-documented explicit
+# connective words (PDTB3 alone catalogs dozens of contrast/concession
+# connectives). This is the closest legitimate, citable, deterministic
+# thing to "reasoning structure" that fits ESGR's hand-given-fact
+# pattern -- cause/contrast/condition relations are lexically signaled,
+# so detecting them is real parsing, not invented understanding.
+DISCOURSE_NAMES = ["AFFIRM", "NEGATE", "NEGATOR",
+                    "TEMPORAL", "CONTINGENCY", "COMPARISON", "EXPANSION"]
 DISCOURSE_MAP = {
     "yes": "AFFIRM",
     "no": "NEGATE",
     "not": "NEGATOR",
+    # TEMPORAL: sequence/synchrony connectives (PDTB)
+    "then": "TEMPORAL", "after": "TEMPORAL", "before": "TEMPORAL",
+    "when": "TEMPORAL", "until": "TEMPORAL", "once": "TEMPORAL",
+    "meanwhile": "TEMPORAL",
+    # CONTINGENCY: cause/condition connectives (PDTB)
+    "because": "CONTINGENCY", "since": "CONTINGENCY", "so": "CONTINGENCY",
+    "therefore": "CONTINGENCY", "thus": "CONTINGENCY", "if": "CONTINGENCY",
+    "unless": "CONTINGENCY", "hence": "CONTINGENCY",
+    # COMPARISON: contrast/concession connectives (PDTB)
+    "but": "COMPARISON", "however": "COMPARISON", "although": "COMPARISON",
+    "though": "COMPARISON", "while": "COMPARISON", "yet": "COMPARISON",
+    "still": "COMPARISON", "whereas": "COMPARISON",
+    # EXPANSION: elaboration/addition connectives (PDTB)
+    "and": "EXPANSION", "also": "EXPANSION", "moreover": "EXPANSION",
+    "furthermore": "EXPANSION", "additionally": "EXPANSION",
 }
 
 # Syntax: "How words combine into phrases and clauses. Who is the head?

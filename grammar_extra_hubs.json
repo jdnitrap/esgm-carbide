@@ -14,7 +14,11 @@
   "DISCOURSE": {
     "AFFIRM": 405,
     "NEGATE": 406,
-    "NEGATOR": 407
+    "NEGATOR": 407,
+    "TEMPORAL": 645,
+    "CONTINGENCY": 646,
+    "COMPARISON": 647,
+    "EXPANSION": 648
   },
   "SYNTAX": {
     "HEAD": 408,

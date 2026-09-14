@@ -1,0 +1,24 @@
+{
+  "DISCOVERED_ADJECTIVE_LIKE": {
+    "hub_id": 621,
+    "value_name": "ADJECTIVE_LIKE",
+    "words": [
+      "only",
+      "present",
+      "predetermined",
+      "examined",
+      "double"
+    ]
+  },
+  "DISCOVERED_NOUN_LIKE": {
+    "hub_id": 622,
+    "value_name": "NOUN_LIKE",
+    "words": [
+      "study",
+      "search",
+      "best",
+      "worst",
+      "shadow"
+    ]
+  }
+}
