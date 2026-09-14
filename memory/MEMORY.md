@@ -1,0 +1,4 @@
+- [ESGR growth & modulation (2026-09)](esgr_growth_and_modulation_2026_09.md) — dynamic node growth + reward-modulated Hebbian learning added; 300-node ceiling no longer fixed
+- [ESGR trained head & kWTA fix (2026-09)](esgr_trained_head_and_kwta_fix_2026_09.md) — real byte-level trained head (90.1% acc) teaches the graph back; fixed a 3-stage sparsity-budget bug this surfaced
+- [ESGR generation, dialogue, discovery (2026-09)](esgr_generation_dialogue_discovery_2026_09.md) — autoregressive generation works; TURN/QUESTION_FORM/PDTB-discourse columns + real self-dimension-discovery built; 6 dialogue fine-tune rounds all mode-collapsed (real diagnosed data-scale ceiling)
+- [Tune against real data](feedback_tune_against_real_data.md) — user wants new hyperparameters validated against real project data before presenting defaults
