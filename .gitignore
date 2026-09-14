@@ -1,2 +1,13 @@
 __pycache__/
 *.pyc
+
+# regenerable from the packed sources already committed under mdbe/ --
+# see mdbe/README.md ("python3 mdbe/unpack_tables.py")
+mdbe/ASCII_Linguistics.csv
+mdbe/ASCII_Linguistics_v2.csv
+mdbe/language_mechanics_Mechanics_as_columns.csv
+mdbe/language_mechanics_workbook_Input.csv
+
+# trained head checkpoints: binary, regenerable via `retrain_head` in
+# the shell (head_checkpoint.py / retrain_head.py) -- not source
+*.pt

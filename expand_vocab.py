@@ -1,17 +1,16 @@
-"""One-time vocabulary expansion (2026-09-13): mines the real 5MB corpus
-for the top N most common real words not already in tiles.json, and
-tiles each one exactly the way shell.py's `tile` command would -- same
-free-slot-then-grow logic, same wire_word_structure() call for letters
-and (where word_structure.ROLE_MAP now has an entry) roles. Not a
-shortcut path: running this is equivalent to typing `tile <word>` N
-times by hand, then `save`.
+"""Vocabulary expansion, mined from the real 5MB corpus -- the "safe"
+self-expansion path: frequency alone decides WHAT is worth adding,
+unattended, no person hand-picks a word list. auto_expand_vocab() is the
+reusable core (importable from shell.py's `autoexpand` command or
+anywhere else); main() is the one-shot CLI script that first used it
+2026-09-13 to take the vocabulary 31 -> 130 words.
 
-Why: measured that only 6/31 original words ever got real training
-signal from real adjacent-word pairs in the corpus (see
-EXPERIMENT_LOG.md and esgr-growth-and-modulation-2026-09 memory) --
-real data sparsity from too small a vocabulary, not a flaw in any
-learning rule. Confirmed empirically that expanding to 131 words lifts
-that to 99/131 (76%) real coverage before persisting this for real.
+What this still is NOT: the graph does not decide *when* or *how many*
+words to add on its own -- a person (or a future policy) still triggers
+a run and picks n_words. True self-directed expansion (the system
+deciding for itself, with no external trigger, that it needs more
+structure) is a real, separate, harder capability -- see
+EXPERIMENT_LOG.md, 2026-09-14 entry.
 """
 import re
 import json
@@ -19,6 +18,7 @@ from collections import Counter
 from graph import ESGRGraph
 from byte_identity import CATEGORY_OFFSET, CATEGORY_NAMES
 from word_structure import wire_word_structure, ROLE_OFFSET, ROLE_NAMES
+from grammar_extra import hub_node_ids
 
 CORPUS_PATH = "/home/admin/Downloads/carbide/carbide_training_dataset.txt"
 GRAPH_PATH = "graph.json"
@@ -26,44 +26,36 @@ TILES_PATH = "tiles.json"
 N_NEW_WORDS = 100
 
 
-def mine_top_new_words(current_vocab, n):
-    with open(CORPUS_PATH, encoding="utf-8", errors="ignore") as f:
+def auto_expand_vocab(graph, tiles, n_words=20, corpus_path=CORPUS_PATH,
+                       min_frequency=1, tiles_path=TILES_PATH):
+    """Mines corpus_path for the n_words most common real words not
+    already in `tiles` (case-insensitive; the reserved A/space/newline
+    character tiles are always excluded, real bug found 2026-09-13 --
+    "space" is also a real word and collided with the reserved tile).
+    Tiles each one via the exact free-slot-then-grow() path shell.py's
+    `tile` command uses, wires letters/roles. Mutates `tiles` (a dict)
+    and `graph` in place; writes tiles.json to disk immediately (same
+    convention as `tile`) but does NOT save graph.json -- caller still
+    decides when to persist the grown graph.
+
+    Returns {"mined": [...new words...], "grown": n_new_nodes,
+    "letter_edges": n, "role_edges": n}.
+    """
+    reserved_names = {k.lower() for k in tiles}
+    with open(corpus_path, encoding="utf-8", errors="ignore") as f:
         text = f.read()
     tokens = re.findall(r"[A-Za-z']+", text.lower())
     freq = Counter(tokens)
-    return [w for w, _ in freq.most_common() if w not in current_vocab][:n]
-
-
-def tile_word(name, tiles, reserved):
-    """Exact same logic as shell.py's `tile` command: find a free node
-    id outside the category/role ranges, or grow the graph if none."""
-    node = 274
-    while node in reserved:
-        node += 1
-    return node
-
-
-def main():
-    graph = ESGRGraph.load_json(GRAPH_PATH)
-    with open(TILES_PATH) as f:
-        tiles = json.load(f)
-
-    # ALL existing keys, including the special A/space/newline character
-    # tiles -- real bug found running this the first time: "space" is
-    # also a real, common English word, and excluding the reserved keys
-    # from this set let it get mined as "new" and silently overwrite the
-    # space-character tile (byte 32) with a word node instead. The
-    # reserved names are off-limits regardless of whether they happen to
-    # also be real words.
-    reserved_names = {k.lower() for k in tiles}
-    new_words = mine_top_new_words(reserved_names, N_NEW_WORDS)
-    print(f"mined {len(new_words)} new real words from the corpus, not already tiled")
+    new_words = [w for w, c in freq.most_common()
+                 if w not in reserved_names and c >= min_frequency][:n_words]
 
     n_grown = 0
+    grammar_hubs = hub_node_ids()  # dynamically-allocated, not a fixed offset -- see hub_node_ids()
     for name in new_words:
         reserved = set(tiles.values())
         reserved.update(range(CATEGORY_OFFSET, CATEGORY_OFFSET + len(CATEGORY_NAMES)))
         reserved.update(range(ROLE_OFFSET, ROLE_OFFSET + len(ROLE_NAMES)))
+        reserved.update(grammar_hubs)
         node = 274
         while node in reserved:
             node += 1
@@ -72,14 +64,27 @@ def main():
             n_grown += 1
         tiles[name] = node
 
-    with open(TILES_PATH, "w") as f:
+    with open(tiles_path, "w") as f:
         json.dump(tiles, f, indent=2)
-    print(f"tiles.json updated: {len(current_vocab)} -> {len(tiles) - 3} words "
-          f"(excluding A/space/newline); grew the graph {n_grown} times")
 
-    n_letter, n_role = wire_word_structure(graph, tiles_path=TILES_PATH)
-    print(f"wired {n_letter} letter->word and {n_role} word->role frozen edges "
-          f"(covers old + new words, idempotent for old ones)")
+    n_letter, n_role = wire_word_structure(graph, tiles_path=tiles_path)
+    return {"mined": new_words, "grown": n_grown, "letter_edges": n_letter, "role_edges": n_role}
+
+
+def main():
+    graph = ESGRGraph.load_json(GRAPH_PATH)
+    with open(TILES_PATH) as f:
+        tiles = json.load(f)
+    before = len(tiles) - 3
+
+    stats = auto_expand_vocab(graph, tiles, n_words=N_NEW_WORDS,
+                               corpus_path=CORPUS_PATH, tiles_path=TILES_PATH)
+
+    print(f"mined {len(stats['mined'])} new real words from the corpus, not already tiled")
+    print(f"tiles.json updated: {before} -> {len(tiles) - 3} words "
+          f"(excluding A/space/newline); grew the graph {stats['grown']} times")
+    print(f"wired {stats['letter_edges']} letter->word and {stats['role_edges']} word->role "
+          f"frozen edges (covers old + new words, idempotent for old ones)")
 
     graph.save_json(GRAPH_PATH)
     print(f"saved: n={graph.n}, edges={graph.src.shape[0]}, "

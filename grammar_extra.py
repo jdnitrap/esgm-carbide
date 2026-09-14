@@ -14,7 +14,18 @@ convention as ROLE_MAP's "not"/"yes"/"no".
 
 Uses graph.grow() for hub nodes instead of hunting for free ids in the
 cramped 262-298 range -- the reason that's now safe to do at all.
+
+SYNTAX and MORPHOLOGY added 2026-09-14, from the mdbe/language_mechanics
+worksheets merged into this repo (see EXPERIMENT_LOG.md) -- those two
+mechanics are the ones that map cleanly onto ESGR's existing "one word
+-> one hub" frozen-edge pattern. The other 10 mechanics in that
+framework (Phonetics, Pragmatics, Discourse-the-mechanic [not to be
+confused with this file's DISCOURSE dimension, which is really
+Pragmatics-flavored], Sociolinguistics, etc.) are properties of a whole
+utterance in context, not a fixed word->category fact, and don't fit
+this pattern without real rethinking -- deliberately not attempted here.
 """
+from word_structure import ROLE_MAP
 
 TENSE_NAMES = ["PAST", "PRESENT"]
 TENSE_MAP = {
@@ -52,16 +63,69 @@ DISCOURSE_MAP = {
     "not": "NEGATOR",
 }
 
+# Syntax: "How words combine into phrases and clauses. Who is the head?
+# What depends on it?" (mdbe/language_mechanics_Column_key.csv). Real
+# X-bar-theory distinction, not invented: NOUN/VERB/PRONOUN/PREPOSITION
+# can each independently head a phrase (NP/VP/NP/PP); ARTICLE and
+# ADJECTIVE only ever attach to and modify a head, never head one
+# themselves. Derived FROM word_structure.ROLE_MAP, not hand-typed
+# separately -- one word's syntax value is a fixed function of its role,
+# so keeping ROLE_MAP as the single source of truth avoids the two ever
+# silently disagreeing.
+SYNTAX_NAMES = ["HEAD", "MODIFIER"]
+_ROLE_TO_SYNTAX = {
+    "NOUN": "HEAD", "VERB": "HEAD", "PRONOUN": "HEAD", "PREPOSITION": "HEAD",
+    "ARTICLE": "MODIFIER", "ADJECTIVE": "MODIFIER",
+}
+SYNTAX_MAP = {word: _ROLE_TO_SYNTAX[role] for word, role in ROLE_MAP.items()
+              if role in _ROLE_TO_SYNTAX}
+
+# Morphology: "How words are built from smaller meaning pieces. What
+# pieces is this word made of?" -- scoped to INFLECTION specifically
+# (the worked example's "cat + -s (plural)" vs "sit + PAST -> sat
+# (irregular)"), not derivation (a word like "consciousness" is built
+# from "conscious" + "-ness", but that's a different morphological
+# process and deliberately out of scope here). REGULAR = built by a
+# predictable suffix rule; IRREGULAR = unpredictable form change
+# (ablaut, suppletion). Bare/uninflected root forms (cat, dog, big...),
+# and genuinely uncertain or non-inflectional cases (e.g. "physics" LOOKS
+# like a plural but is a fixed lexical item, not physic+s; "does" is a
+# real edge case left out rather than guessed) are deliberately left
+# unmarked -- real "none" state, same convention as everywhere else in
+# this file.
+MORPHOLOGY_NAMES = ["REGULAR", "IRREGULAR"]
+MORPHOLOGY_MAP = {
+    # regular inflection: predictable -s suffix (plural or 3rd-singular present)
+    "patterns": "REGULAR", "stories": "REGULAR", "billions": "REGULAR",
+    "millions": "REGULAR", "choices": "REGULAR", "beliefs": "REGULAR",
+    "years": "REGULAR", "characters": "REGULAR", "networks": "REGULAR",
+    "times": "REGULAR", "likes": "REGULAR", "eats": "REGULAR",
+    "becomes": "REGULAR", "reveals": "REGULAR",
+    # irregular inflection: unpredictable form change (ablaut/suppletion)
+    "sat": "IRREGULAR", "ran": "IRREGULAR", "is": "IRREGULAR",
+    "are": "IRREGULAR", "was": "IRREGULAR", "has": "IRREGULAR",
+    "these": "IRREGULAR", "written": "IRREGULAR",
+}
+
 DIMENSIONS = {
     "TENSE": (TENSE_NAMES, TENSE_MAP),
     "NUMBER": (NUMBER_NAMES, NUMBER_MAP),
     "ANIMACY": (ANIMACY_NAMES, ANIMACY_MAP),
     "DISCOURSE": (DISCOURSE_NAMES, DISCOURSE_MAP),
+    "SYNTAX": (SYNTAX_NAMES, SYNTAX_MAP),
+    "MORPHOLOGY": (MORPHOLOGY_NAMES, MORPHOLOGY_MAP),
 }
 
 
 def wire_grammar_extra(graph, tiles_path="tiles.json"):
-    """Grows one hub node per category value across all four dimensions,
+    """NOT idempotent -- unlike add_fixed_edge(), graph.grow() unconditionally
+    adds new nodes every call, so calling this twice on the same graph
+    grows a second, orphaned set of hub nodes instead of reusing the
+    first. Already run once against the real graph.json (2026-09-14);
+    the resulting hub ids are saved in grammar_extra_hubs.json -- load
+    that instead of calling this again for the real graph.
+
+    Grows one hub node per category value across all four dimensions,
     then wires each mapped word to its hub with a frozen, confirmed
     edge -- identical mechanism to word_structure.py's word->role wiring,
     just a different set of hubs. Returns {dimension_name: {value_name:
@@ -78,13 +142,50 @@ def wire_grammar_extra(graph, tiles_path="tiles.json"):
         new_ids = graph.grow(len(names))
         hub_ids[dim_name] = dict(zip(names, new_ids))
         for word, value in word_map.items():
+            if word in ("A", "space", "newline"):
+                # Same guard word_structure.wire_word_structure() applies
+                # to its own word_tiles -- these are reserved character
+                # tile names, never real words, even if a hand-typed map
+                # (like SYNTAX_MAP, derived from ROLE_MAP) has a stale
+                # entry for one. Found by testing: without this, the
+                # space CHARACTER got wired into SYNTAX=HEAD as if it
+                # were the noun "space".
+                continue
             node = tiles.get(word) or tiles.get(word.lower())
             if node is None:
                 continue  # word not tiled yet -- skip, don't invent an id
+            if node >= graph.n:
+                # Same real gap found in word_structure.wire_word_structure():
+                # tiles.json can reference a bigger, grown graph than the
+                # one passed in here -- skip what doesn't fit rather than
+                # crash (add_fixed_edge() itself now raises on this).
+                continue
             hub_node = hub_ids[dim_name][value]
             graph.add_fixed_edge(node, hub_node, weight=1.0, trust=1.0)
             n_edges += 1
     return hub_ids, n_edges
+
+
+def hub_node_ids(hubs_path="grammar_extra_hubs.json"):
+    """All node ids used as hubs across every dimension in this file,
+    read from the saved hub_ids (grammar_extra_hubs.json). Unlike
+    CATEGORY_OFFSET/ROLE_OFFSET, these are NOT a fixed, predictable
+    range -- grow() allocates them wherever the graph happened to be
+    sized when wire_grammar_extra() last ran -- so anything that
+    computes a "reserved/used node id" set (shell.py's `tile` command,
+    expand_vocab.auto_expand_vocab()) has to read this file to know
+    what to avoid. Real bug found by testing: without this,
+    auto_expand_vocab() silently reassigned 13 of 15 newly mined real
+    words onto the exact node ids the TENSE/NUMBER/ANIMACY/DISCOURSE/
+    SYNTAX/MORPHOLOGY hubs already live at. Returns an empty set if the
+    file doesn't exist yet (grammar_extra never wired)."""
+    import json
+    import os
+    if not os.path.exists(hubs_path):
+        return set()
+    with open(hubs_path) as f:
+        hub_ids = json.load(f)
+    return {nid for dim in hub_ids.values() for nid in dim.values()}
 
 
 def get_value(graph, hub_ids, dim_name, word_node):

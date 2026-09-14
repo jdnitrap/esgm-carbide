@@ -1,0 +1,27 @@
+{
+  "TENSE": {
+    "PAST": 399,
+    "PRESENT": 400
+  },
+  "NUMBER": {
+    "SINGULAR": 401,
+    "PLURAL": 402
+  },
+  "ANIMACY": {
+    "ANIMATE": 403,
+    "INANIMATE": 404
+  },
+  "DISCOURSE": {
+    "AFFIRM": 405,
+    "NEGATE": 406,
+    "NEGATOR": 407
+  },
+  "SYNTAX": {
+    "HEAD": 408,
+    "MODIFIER": 409
+  },
+  "MORPHOLOGY": {
+    "REGULAR": 410,
+    "IRREGULAR": 411
+  }
+}

@@ -10,6 +10,9 @@ from graph import ESGRGraph
 from fact_gate import FactGate
 from byte_identity import wire_byte_identity, CATEGORY_OFFSET, CATEGORY_NAMES
 from word_structure import wire_word_structure, ROLE_OFFSET, ROLE_NAMES
+from expand_vocab import auto_expand_vocab
+from grammar_extra import hub_node_ids
+from retrain_head import retrain_head, uncertainty_signal
 from decode import decode
 from sequence import generate_sequence, DEFAULT_GRAMMAR, GRAMMARS
 
@@ -74,6 +77,9 @@ propose <name-or-int>
 confirm <name-or-int> <name-or-int>
 reject <name-or-int> <name-or-int>
 auto [on|off]  (with no arg, prints current state; on = sustained-trust candidates confirm themselves)
+autoexpand [n=20]  (mines the corpus for the n most common real words not yet tiled, adds them unattended)
+uncertainty  (how many proposed-but-unconfirmed edges exist right now -- a real signal for when retrain_head might be worth running)
+retrain_head [epochs=3]  (warm-starts from the saved checkpoint if one exists, trains on real corpus bytes, saves)
 say
 status
 tiles
@@ -168,6 +174,34 @@ def main():
             else:
                 print("usage: auto <on|off>")
 
+        elif cmd == "autoexpand":
+            n = int(args[0]) if args else 20
+            stats = auto_expand_vocab(graph, TILES, n_words=n)
+            TILES_REV.clear()
+            TILES_REV.update({v: k for k, v in TILES.items()})
+            shown = ", ".join(stats["mined"][:10]) + ("..." if len(stats["mined"]) > 10 else "")
+            print(f"auto-expanded: mined {len(stats['mined'])} words ({shown})")
+            print(f"grew graph {stats['grown']} times, wired {stats['letter_edges']} letter "
+                  f"+ {stats['role_edges']} role edges -- remember to `save` to persist the graph")
+
+        elif cmd == "uncertainty":
+            n = uncertainty_signal(graph, gate)
+            print(f"proposed-but-unconfirmed edges: {n}")
+
+        elif cmd == "retrain_head":
+            n_epochs = int(args[0]) if args else 3
+            print("retraining (this reads the real corpus and trains for real, may take a moment)...")
+            stats = retrain_head(graph, n_epochs=n_epochs)
+            if stats["had_checkpoint"]:
+                grow_note = (f", warm-started {stats['old_dim']}->{stats['new_dim']} cols"
+                             if stats["warm_started"] else "")
+                print(f"loaded existing checkpoint{grow_note}")
+                print(f"held-out accuracy before: {stats['before_acc']:.4f}")
+            else:
+                print("no existing checkpoint -- started fresh")
+            print(f"held-out accuracy after {stats['epochs']} epochs: {stats['after_acc']:.4f}")
+            print("checkpoint saved -- graph itself untouched by this (head training never writes to the graph)")
+
         elif cmd == "propose":
             src = resolve(args[0])
             if src is None:
@@ -227,6 +261,7 @@ def main():
                 used = set(TILES.values())
                 used.update(range(CATEGORY_OFFSET, CATEGORY_OFFSET + len(CATEGORY_NAMES)))
                 used.update(range(ROLE_OFFSET, ROLE_OFFSET + len(ROLE_NAMES)))
+                used.update(hub_node_ids())  # grammar_extra hubs -- dynamically allocated, real bug found by testing
                 node = 274
                 while node in used:
                     node += 1

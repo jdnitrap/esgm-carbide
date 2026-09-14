@@ -179,3 +179,73 @@ suite after each fix:**
 Full test suite (`test_graph_sanity.py`, `test_fact_gate.py`,
 `test_sequence.py`, `test_integration_stress.py` against the real,
 now-expanded `graph.json`) passes after every fix.
+
+## 2026-09-14 — SYNTAX/MORPHOLOGY mechanics, self-expansion, and a real
+byte-level trained head that reads and writes back through the graph
+
+**`grammar_extra.py` gained SYNTAX and MORPHOLOGY**, from the merged
+`mdbe/language_mechanics_*` worksheets (audited line-by-line first --
+zero errors found there, unlike the byte-level `ASCII_Linguistics`
+tables, which stay explicitly out of scope: real, verified errors,
+built for a transformer/SSM/xLSTM's dense input layer, not ESGR). SYNTAX
+is derived FROM `word_structure.ROLE_MAP` (not hand-typed separately --
+one word's syntax is a fixed function of its role). Real bug found
+wiring this to the live graph: a stale `"space": "NOUN"` entry left over
+from the earlier vocabulary-expansion collision fix would have wired the
+space CHARACTER into SYNTAX=HEAD; removed, and `wire_grammar_extra()`
+now has the same reserved-name guard `wire_word_structure()` already had.
+
+**Self-expansion, the "safe version":** `expand_vocab.auto_expand_vocab()`
+is now reusable (not just a one-shot script) and wired into the shell as
+`autoexpand [n]` -- frequency alone decides what's added, unattended, no
+hand-picked word list. Real bug found on its first real test: 13 of 15
+newly mined words collided with the grammar_extra hub nodes, because
+those hubs are dynamically grown (no fixed offset like ROLE_OFFSET) and
+nothing outside `grammar_extra.py` knew where they live. Fixed with one
+shared source of truth, `grammar_extra.hub_node_ids()`, used by both
+`autoexpand` and the `tile` command.
+
+**A real, tested byte-level trained head (`head.py`), at explicit user
+direction, layered on top of the graph without ever backpropagating into
+it:**
+- Rows = raw byte value (0x00-0xFF), matching Carbide's own token unit,
+  not word-level.
+- Per-byte input = a learned embedding concatenated with 32 real, fixed
+  columns: the 6 `byte_identity.py` flags (always live) plus the 26
+  word-level mechanics columns (ROLE/TENSE/NUMBER/ANIMACY/DISCOURSE/
+  SYNTAX/MORPHOLOGY), which only turn on at the exact byte where a real
+  tiled word completes -- causal only, never looks ahead.
+- Ablation methodology replays Carbide's own (3-seed, `full` vs
+  `embedding-only` vs `tags-only`): the mechanics columns gave a real,
+  repeatable ~3-point accuracy gain across 3 seeds (35.4%/34.5%/35.1% ->
+  38.4%/37.8%/38.5%), same controlled-comparison discipline as
+  `carbide/MDBE_MANIFEST.md`.
+- Single-token (bigram) head could never beat a plain count table --
+  expected: one byte of context can't out-predict counting on the same
+  one byte. `NextByteRNN` (a real GRU) was built specifically to test
+  whether more context helps, and it does: beats the weak order-1
+  baseline easily, and after warm-starting (see below), beat the much
+  harder order-2 (previous-2-bytes) baseline for the first time --
+  43.67% vs 42.69%.
+- **Checkpointing with warm-start** (`head_checkpoint.py`): when the
+  graph grows a new fixed column, the byte embedding table, GRU
+  hidden-to-hidden weights, and output layer are provably unaffected by
+  that (verified: copied byte-for-byte); only the GRU's input weight
+  slice for the brand-new columns needs fresh init, since
+  `build_tag_table()` always appends new columns after existing ones.
+  Measured, not assumed: warm-start's first epoch (38.65%) already beat
+  cold-start's third (33.81%).
+- **The head teaches the graph back** (`retrain_head.py`,
+  `supervise.py`'s existing `supervised_step()`, never a new backprop
+  path): only on predictions that are both confident AND actually
+  correct against real data -- 8,734 real edges reinforced this way in
+  one test run, 0 frozen edges touched, graph node count unchanged.
+- **`retrain_head` (shell command) + `uncertainty`**: a person decides
+  when to fire a retrain, informed by a real, checkable signal (count of
+  currently proposed-but-unconfirmed edges) -- nothing retrains
+  automatically.
+
+All of the above verified never touches `graph.w`/`tau`/`confirmed`/
+`modulation`/`n`/edge count -- checked explicitly with before/after
+tensor snapshots, not just by code inspection. Full existing test suite
+still passes throughout.

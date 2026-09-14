@@ -74,7 +74,18 @@ ROLE_MAP = {
     "question": "NOUN", "beliefs": "NOUN", "truth": "NOUN", "meaning": "NOUN",
     "matter": "NOUN", "philosophy": "NOUN", "physics": "NOUN", "effect": "NOUN",
     "reality": "NOUN", "experiment": "NOUN", "particle": "NOUN", "years": "NOUN",
-    "story": "NOUN", "time": "NOUN", "space": "NOUN", "literature": "NOUN",
+    "story": "NOUN", "time": "NOUN", "literature": "NOUN",
+    # NOTE: "space" (the real English noun) was here, but "space" is
+    # also the reserved tiles.json key for the space CHARACTER (byte
+    # 32) -- it collided and got dropped during the 2026-09-13
+    # vocabulary expansion (see EXPERIMENT_LOG.md). This ROLE_MAP entry
+    # was accidentally left behind afterward: wire_word_structure()'s
+    # own word_tiles filter (line ~98) happens to exclude "space" by
+    # name, so it was silently harmless here, but grammar_extra.py's
+    # SYNTAX dimension (derived from this dict) had no equivalent
+    # filter and would have wired the space CHARACTER into SYNTAX=HEAD
+    # as if it were the noun -- found by testing. Removed rather than
+    # re-added under an alternate key, consistent with the original fix.
     "era": "NOUN", "characters": "NOUN", "language": "NOUN", "reader": "NOUN",
     "data": "NOUN", "networks": "NOUN", "times": "NOUN",
     "are": "VERB", "has": "VERB", "was": "VERB", "becomes": "VERB",
