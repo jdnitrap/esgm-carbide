@@ -1,0 +1,9 @@
+Helper — auto-split of Input!B2. Do not type here.,,,,,,
+n,raw_token,clean,lower,is_punct,closed_class,is_pronoun
+1,The,The,the,0,1,0
+2,black,black,black,0,0,0
+3,cats,cats,cats,0,0,0
+4,sat,sat,sat,0,0,0
+5,on,on,on,0,1,0
+6,the,the,the,0,1,0
+7,mat.,mat,mat,0,0,0

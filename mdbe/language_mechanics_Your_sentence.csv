@@ -1,0 +1,5 @@
+Same columns — fill one row per sentence,,,,,,,,,,,,
+"Yellow cells are inputs. Put the full sentence in column A, then write how EACH mechanic applies to that whole sentence in the matching column. Do not split into word-rows unless you want to; the columns are the mechanics.",,,,,,,,,,,,
+Sentence,Channel,Phonetics,Phonology,Orthography,Tokenization,Morphology,Lexicon,Syntax,Semantics,Pragmatics,Discourse,Sociolinguistics
+The black cats sat on the mat.,Printed English on a page / spoken audio of that sentence.,[ðə blæk kʰæts sæt ɑn ðə mæt],/ðə blæk kæts sæt ɑn ðə mæt/  — /æ/ vs /ɑ/ would be a different word.,T-h-e space b-l-a-c-k space c-a-t-s … period.,The | black | cats | sat | on | the | mat | .,cat + -s (plural); sit + PAST → sat (irregular).,cat=feline; sat=past of sit; mat=floor covering — not other senses.,NP[The black cats] + VP[sat] + PP[on the mat]. Subject of sat = cats.,AGENT=cats; PRED=sit; LOCATION=mat; TIME=past.,Assertion. Reports a past event. Not a command.,First mention of the cats and the mat; both now available as 'they' / 'it'.,Neutral written English; textbook register.
+I like to sit.,,,,,,,,,,,,
