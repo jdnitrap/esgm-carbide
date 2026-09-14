@@ -53,7 +53,7 @@ def _eval_acc(model, x, y, t):
 
 def retrain_head(graph, n_epochs=3, checkpoint_path=CHECKPOINT_PATH,
                   tiles_path="tiles.json", hubs_path="grammar_extra_hubs.json",
-                  sample_bytes=SAMPLE_BYTES):
+                  sample_bytes=SAMPLE_BYTES, verbose=False):
     """Loads the existing checkpoint (warm-starting if the graph's tag
     structure grew since it was saved) or starts fresh if none exists
     yet, trains n_epochs on a real corpus sample, saves the result.
@@ -83,6 +83,7 @@ def retrain_head(graph, n_epochs=3, checkpoint_path=CHECKPOINT_PATH,
     n = train_x.shape[0]
     for epoch in range(n_epochs):
         perm = torch.randperm(n)
+        total_loss, n_batches = 0.0, 0
         for i in range(0, n, BATCH_SIZE):
             idx = perm[i:i + BATCH_SIZE]
             logits, _ = model(train_x[idx], train_t[idx])
@@ -90,6 +91,11 @@ def retrain_head(graph, n_epochs=3, checkpoint_path=CHECKPOINT_PATH,
             opt.zero_grad()
             loss.backward()
             opt.step()
+            total_loss += loss.item()
+            n_batches += 1
+        if verbose:
+            epoch_acc = _eval_acc(model, held_x, held_y, held_t)
+            print(f"  epoch {epoch+1}/{n_epochs}: loss={total_loss/n_batches:.4f} held-out_acc={epoch_acc:.4f}", flush=True)
 
     after_acc = _eval_acc(model, held_x, held_y, held_t)
     save_head_checkpoint(model, checkpoint_path, emb_dim=16, hidden=64, tag_dim=N_COLUMNS)

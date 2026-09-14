@@ -11,7 +11,7 @@ from head import build_tag_table
 from supervise import supervised_step
 
 FULL_CORPUS_BYTES = 5_000_000
-EPOCHS = 4
+EPOCHS = 25  # heavy run, at explicit user direction -- was 4
 
 print(f"loading graph...")
 g = ESGRGraph.load_json("graph.json")
@@ -22,7 +22,7 @@ n_before = g.n
 
 t0 = time.time()
 print(f"training on {FULL_CORPUS_BYTES:,} real corpus bytes, {EPOCHS} epochs, warm-started if a checkpoint exists...")
-stats = retrain_head(g, n_epochs=EPOCHS, sample_bytes=FULL_CORPUS_BYTES)
+stats = retrain_head(g, n_epochs=EPOCHS, sample_bytes=FULL_CORPUS_BYTES, verbose=True)
 elapsed = time.time() - t0
 
 print(f"\n=== training done in {elapsed:.1f}s ===")

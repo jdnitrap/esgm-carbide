@@ -95,6 +95,73 @@ ROLE_MAP = {
     "deep": "ADJECTIVE", "complex": "ADJECTIVE", "same": "ADJECTIVE",
     "unexamined": "ADJECTIVE", "classical": "ADJECTIVE", "dark": "ADJECTIVE",
     "great": "ADJECTIVE", "natural": "ADJECTIVE", "written": "ADJECTIVE",
+
+    # 2026-09-14: the ~226 words added by autoexpand/autopilot after the
+    # 130-word pass above never got role assignments (a real, flagged
+    # gap -- see EXPERIMENT_LOG.md). Same rule as before: only words
+    # confident regardless of context. Left deliberately unassigned
+    # (real "none" state, not an oversight): and, that, but, yet, how,
+    # both, than, constantly, only, simultaneously, present, study,
+    # enabling, processing, democratized, better(kept ADJECTIVE below
+    # instead), cycles, past, shows, suffering, shape, truly, more,
+    # often, function, well, being, born, predetermined, rather, mean,
+    # authentically, examined, worth, living, challenge, wherever, may,
+    # knowing, use, found, created, forever, seeking, construct, help,
+    # sense, even, granted, doing, so, search, far, stranger, imagined,
+    # existing, states, observed, this, plays, double, depending,
+    # measure, defying, cannot(kept VERB below instead), position,
+    # estimated, trillion, billion, two, made, literally, composed,
+    # forged, best, worst, shadow, love, sacrifice, transport, long,
+    # finish, reading, mirror, reflecting, hopes, fears, dreams.
+    "systems": "NOUN", "ai": "NOUN", "technology": "NOUN", "people": "NOUN",
+    "forest": "NOUN", "oxygen": "NOUN", "water": "NOUN", "depths": "NOUN",
+    "destruction": "NOUN", "climate": "NOUN", "system": "NOUN",
+    "biodiversity": "NOUN", "sea": "NOUN", "food": "NOUN", "humans": "NOUN",
+    "essence": "NOUN", "nature": "NOUN", "actions": "NOUN",
+    "responsibility": "NOUN", "freedom": "NOUN", "burden": "NOUN",
+    "opportunity": "NOUN", "assumptions": "NOUN", "wisdom": "NOUN",
+    "pursuit": "NOUN", "happiness": "NOUN", "attainment": "NOUN",
+    "engagement": "NOUN", "thing": "NOUN", "chaos": "NOUN",
+    "randomness": "NOUN", "narratives": "NOUN", "distinction": "NOUN",
+    "foundations": "NOUN", "certainty": "NOUN", "assumption": "NOUN",
+    "particles": "NOUN", "superposition": "NOUN", "notions": "NOUN",
+    "locality": "NOUN", "uncertainty": "NOUN", "principle": "NOUN",
+    "momentum": "NOUN", "precision": "NOUN", "cosmos": "NOUN",
+    "galaxies": "NOUN", "stars": "NOUN", "sun": "NOUN", "star": "NOUN",
+    "galaxy": "NOUN", "planet": "NOUN", "bang": "NOUN", "epoch": "NOUN",
+    "energy": "NOUN", "stardust": "NOUN", "elements": "NOUN",
+    "furnaces": "NOUN", "structure": "NOUN", "tale": "NOUN",
+    "cities": "NOUN", "resurrection": "NOUN", "redemption": "NOUN",
+    "individuals": "NOUN", "loyalty": "NOUN", "word": "NOUN",
+    "minds": "NOUN", "hearts": "NOUN", "truths": "NOUN",
+    "imagination": "NOUN", "page": "NOUN", "observer": "NOUN",
+    "participation": "NOUN", "role": "NOUN", "fabric": "NOUN",
+    "slit": "NOUN", "wave": "NOUN", "entanglement": "NOUN",
+    "connections": "NOUN", "distances": "NOUN", "mechanics": "NOUN",
+
+    "understand": "VERB", "create": "VERB", "tries": "VERB",
+    "define": "VERB", "seek": "VERB", "must": "VERB", "exist": "VERB",
+    "suggests": "VERB", "demonstrates": "VERB", "behaves": "VERB",
+    "creates": "VERB", "contains": "VERB", "sustains": "VERB",
+    "spans": "VERB", "comprise": "VERB", "teaches": "VERB",
+    "examine": "VERB", "take": "VERB", "discover": "VERB",
+    "leads": "VERB", "precedes": "VERB", "cannot": "VERB",
+    "grapple": "VERB", "inhabit": "VERB", "transcends": "VERB",
+    "speak": "VERB", "have": "VERB",
+
+    "mental": "ADJECTIVE", "curious": "ADJECTIVE", "true": "ADJECTIVE",
+    "useful": "ADJECTIVE", "rare": "ADJECTIVE", "eternal": "ADJECTIVE",
+    "quantum": "ADJECTIVE", "subatomic": "ADJECTIVE", "multiple": "ADJECTIVE",
+    "fundamental": "ADJECTIVE", "instantaneous": "ADJECTIVE",
+    "perfect": "ADJECTIVE", "mysterious": "ADJECTIVE", "stellar": "ADJECTIVE",
+    "mathematical": "ADJECTIVE", "underlying": "ADJECTIVE",
+    "universal": "ADJECTIVE", "dependent": "ADJECTIVE", "blue": "ADJECTIVE",
+    "hot": "ADJECTIVE", "better": "ADJECTIVE",
+
+    "about": "PREPOSITION", "until": "PREPOSITION", "beyond": "PREPOSITION",
+    "after": "PREPOSITION",
+
+    "every": "ARTICLE",
 }
 
 ROLE_LABELS = {ROLE_OFFSET + i: name for i, name in enumerate(ROLE_NAMES)}
