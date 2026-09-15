@@ -46,6 +46,18 @@ WORD_DIMS = [
     ("DISCOURSE", DISCOURSE_NAMES, "DISCOURSE"),
     ("SYNTAX", SYNTAX_NAMES, "SYNTAX"),
     ("MORPHOLOGY", MORPHOLOGY_NAMES, "MORPHOLOGY"),
+    # discover_dimension.py's human-confirmed clusters (discovered_dimensions.json),
+    # merged into hub_ids by grammar_extra.load_hub_ids() -- same "one
+    # value per dimension" shape as everything above, just discovered
+    # from real data instead of hand-named. Real gap found by testing:
+    # confirm_dimension() already wires and persists confirmed graph
+    # edges for these; nothing wired them into this table until now, so
+    # a confirmed discovery was a fact in graph.json the model could
+    # never see. Hardcoded here, same as every other dimension in this
+    # list -- add the next one by name when it's confirmed, not via a
+    # fully dynamic mechanism nobody's asked for yet.
+    ("DISCOVERED_ADJECTIVE_LIKE", ["ADJECTIVE_LIKE"], "DISCOVERED_ADJECTIVE_LIKE"),
+    ("DISCOVERED_NOUN_LIKE", ["NOUN_LIKE"], "DISCOVERED_NOUN_LIKE"),
 ]
 WORD_TAG_DIM = sum(len(names) + 1 for _, names, _ in WORD_DIMS)  # +1 = a real "none" bucket per dimension
 
@@ -103,11 +115,14 @@ def byte_columns(graph, byte_val):
     graph's own frozen byte->category edges (not recomputed from
     byte_categories() directly) -- so if a specific edge were ever
     rejected/altered this reflects the graph's actual live state, not
-    just the classification rule in isolation. Read-only."""
+    just the classification rule in isolation. Suspended-but-confirmed
+    edges count as off, matching word_structure.get_role() -- a
+    contradiction-suspended edge stays `confirmed` on purpose (see that
+    docstring), so confirmed alone isn't enough to trust it. Read-only."""
     vec = torch.zeros(BYTE_COLUMNS_DIM)
     for i in range(BYTE_COLUMNS_DIM):
         e = graph.find_edge(byte_val, CATEGORY_OFFSET + i)
-        if e is not None and bool(graph.confirmed[e]):
+        if e is not None and bool(graph.confirmed[e]) and not bool(graph.suspended[e]):
             vec[i] = 1.0
     return vec
 

@@ -216,14 +216,46 @@ def hub_node_ids(hubs_path="grammar_extra_hubs.json"):
     return {nid for dim in hub_ids.values() for nid in dim.values()}
 
 
+def load_hub_ids(hubs_path="grammar_extra_hubs.json", discovered_path="discovered_dimensions.json"):
+    """The single, canonical way to load hub_ids -- merges the hand-
+    named grammar_extra dimensions with any human-confirmed
+    discover_dimension.py clusters, so every caller (head.py's tag
+    table included) sees both without each having to know
+    discovered_dimensions.json exists. Real gap found by testing:
+    discover_dimension.py's confirm_dimension() already wires and
+    persists real, confirmed graph edges for discovered clusters, but
+    nothing merged them into the hub_ids every tag-building function
+    reads from, so a confirmed discovery was a fact in graph.json that
+    the tag table could never see. discovered_dimensions.json's shape
+    is {dim_name: {"hub_id": id, "value_name": name, "words": [...]}}
+    -- one value per discovered dimension so far; reshaped here to the
+    same {dim_name: {value_name: hub_id}} shape grammar_extra_hubs.json
+    already uses, so get_value() needs no special-casing to read either
+    kind. Returns {} if neither file exists yet."""
+    import json
+    import os
+    hub_ids = {}
+    if os.path.exists(hubs_path):
+        with open(hubs_path) as f:
+            hub_ids = json.load(f)
+    if os.path.exists(discovered_path):
+        with open(discovered_path) as f:
+            discovered = json.load(f)
+        for dim_name, entry in discovered.items():
+            hub_ids[dim_name] = {entry["value_name"]: entry["hub_id"]}
+    return hub_ids
+
+
 def get_value(graph, hub_ids, dim_name, word_node):
     """Mirror of word_structure.get_role() for any of these dimensions:
     returns the value name (e.g. "PAST") for a word node, or None if it
-    has no confirmed edge into this dimension's hubs -- a real 'none'
-    state, not missing data."""
+    has no confirmed, non-suspended edge into this dimension's hubs --
+    a real 'none' state, not missing data. Suspended-but-confirmed
+    edges are treated as none, matching get_role() -- see that
+    docstring for why confirmed alone isn't enough."""
     for value_name, hub_node in hub_ids[dim_name].items():
         e = graph.find_edge(word_node, hub_node)
-        if e is not None and bool(graph.confirmed[e]):
+        if e is not None and bool(graph.confirmed[e]) and not bool(graph.suspended[e]):
             return value_name
     return None
 

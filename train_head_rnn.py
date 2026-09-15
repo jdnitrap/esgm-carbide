@@ -90,7 +90,8 @@ def main():
     snap = {"w": g.w.clone(), "tau": g.tau.clone(), "confirmed": g.confirmed.clone(),
             "modulation": g.modulation.clone(), "n": g.n, "n_edges": g.src.shape[0]}
     tiles = json.load(open("tiles.json"))
-    hub_ids = json.load(open("grammar_extra_hubs.json"))
+    from grammar_extra import load_hub_ids
+    hub_ids = load_hub_ids()
 
     data, starts = load_sequences()
     t0 = time.time()

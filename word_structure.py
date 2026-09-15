@@ -201,11 +201,18 @@ def wire_word_structure(graph, tiles_path="tiles.json"):
 def get_role(graph, word_node):
     """Returns the role NAME (e.g. "NOUN") for a word node, or None if
     it has no role edge (a real, valid "none" state, not missing data).
-    Read-only — checks for a confirmed word->role_hub edge.
+    Read-only — checks for a confirmed, non-suspended word->role_hub
+    edge. Checking confirmed alone was a real bug found by testing:
+    contradiction-suspension (graph.py's E_contr auto-suspend) sets
+    only `suspended`, deliberately leaving `confirmed` untouched so a
+    later confirm()/reject() has something to resolve -- so a
+    confirmed-then-suspended edge kept reporting its role as if the
+    fight never happened. decode() already treats suspend as silence;
+    this now matches that.
     """
     for i, role_node in enumerate(range(ROLE_OFFSET, ROLE_OFFSET + len(ROLE_NAMES))):
         e = graph.find_edge(word_node, role_node)
-        if e is not None and bool(graph.confirmed[e]):
+        if e is not None and bool(graph.confirmed[e]) and not bool(graph.suspended[e]):
             return ROLE_NAMES[i]
     return None
 

@@ -199,12 +199,20 @@ until this pass, so it's worth stating plainly:
   `build_tag_table()`).
 - **The Memory still supplies the Generator's inputs, live, every
   step** — the tag table the Generator reads from is recomputed from
-  current graph state each time, not cached — but **the Memory does
-  not yet veto the Generator's output.** `suspend()`/`reject()` change
-  what the Memory will report on the next query; they do not currently
-  stop `generate_bytes.py` from having already emitted a byte before
-  that query happens. Nothing enforces "Memory and Generator must
-  agree" today.
+  current graph state each time, not cached — and **as of 2026-09-14
+  (session 3), the Memory does veto the Generator's output at the word
+  level.** `generate_bytes.py`'s `_word_is_vetoed()` checks, after each
+  byte, whether it just completed a real tiled word whose role or
+  dimension edge is explicitly `rejected()` or currently `suspended()`;
+  if so, that word is stripped back out and generation stops there. A
+  word with no structural edge at all (an invented spelling) is not
+  vetoed — silence isn't a dispute, only an explicit one is. This
+  closes the gap this section used to describe as open; see
+  `EXPERIMENT_LOG.md` for the verification. (Fixing this also surfaced
+  a related bug: `get_role()`/`get_value()`/`byte_columns()` used to
+  check only `confirmed`, not `suspended` — a contradiction-suspended
+  edge kept reporting its old value as if nothing happened. Also fixed,
+  same session.)
 - **There are two independent generation paths that currently
   coexist**, and this can read as one system talking with two voices
   if you don't know to expect it: `sequence.py` is the older,
@@ -239,13 +247,24 @@ ESGM-CARBIDE fork possible without touching this component at all.
 - **`grammar_extra.py`** — six more hand-coded English mechanics
   dimensions beyond the original 6 syntactic roles: TENSE, NUMBER,
   ANIMACY, DISCOURSE, SYNTAX, MORPHOLOGY. Same frozen-edge pattern as
-  `word_structure.py`; wired and queryable, and now consumed by
-  `head.py` (below) as fixed tag columns — still not consumed by
-  `sequence.py`'s own generation logic.
+  `word_structure.py`; wired and queryable, and consumed by `head.py`
+  (below) as fixed tag columns. `sequence.py`'s own generation logic
+  now consumes TENSE and NUMBER specifically, via
+  `shell.py`'s `gen` command passing real `hub_ids` into
+  `generate_sequence()` (fixed 2026-09-14, session 3 — previously
+  always called with `hub_ids=None`, so the agreement-scoring code
+  that already existed was dead in the real path); ANIMACY, DISCOURSE,
+  SYNTAX, and MORPHOLOGY still aren't used by any agreement rule in
+  `sequence.py`.
 - **`discover_dimension.py`** — lets the graph propose a genuinely new
   category/dimension for itself from real data (distributional
   clustering), instead of only filling in categories a human already
-  named. Built; not yet wired into `head.py`'s tag table.
+  named. The two currently-confirmed clusters
+  (`DISCOVERED_ADJECTIVE_LIKE`, `DISCOVERED_NOUN_LIKE`) are now wired
+  into `head.py`'s tag table (`WORD_DIMS`, fixed 2026-09-14, session
+  3) via `grammar_extra.load_hub_ids()`, which merges
+  `discovered_dimensions.json` into the same `hub_ids` shape
+  everything else already used.
 - **`supervise.py`** — a local, single-hop, ground-truth-corrected
   learning rule (not backprop). Built and honestly measured against real
   data; didn't beat a trivial counting baseline at the vocabulary size it
@@ -337,10 +356,11 @@ separate, later, larger effort):
   away, not a redesign.
 
 **Natural next directions**, given what's built:
-- Wire the graph's `suspend()`/`reject()` state into `generate_bytes.py`
-  so the mouth can't emit a byte the brain would currently veto — see
-  "Architecture" above; this is the one gap where the two organs don't
-  yet agree by construction.
+- Extend `sequence.py`'s `_AGREEMENT_RULES` to cover ANIMACY,
+  DISCOURSE, SYNTAX, and MORPHOLOGY — only TENSE and NUMBER currently
+  have a real agreement rule; the other four `grammar_extra.py`
+  dimensions are consumed by `head.py`'s tag table but not yet used to
+  constrain the graph-only generation path.
 - Scale training further now that the tau-decay floor bug (see
   `EXPERIMENT_LOG.md`) is fixed — that fix specifically unblocks
   training runs longer than the ~5M ticks where the bug first
@@ -350,10 +370,6 @@ separate, later, larger effort):
   the 31→130+ word expansion, rather than hand-writing more synthetic
   examples — re-check how many real distinct corpus words remain
   untapped before picking a target.
-- Feed the `grammar_extra.py` dimensions (TENSE/NUMBER/ANIMACY/
-  DISCOURSE/SYNTAX/MORPHOLOGY) into `sequence.py`/`decode.py` too —
-  already consumed by `head.py`'s tag table, still not used to
-  constrain the graph-only generation path.
 - If dialogue capability gets picked up again: rewrite
   `dialogue_corpus.txt` with genuinely rich, multi-sentence answers
   instead of more one-line facts in the same thin shape — that lever

@@ -13,6 +13,7 @@ import torch.nn as nn
 from graph import ESGRGraph
 from head import NextByteRNN, build_tag_table, N_COLUMNS
 from head_checkpoint import save_head_checkpoint, load_head_checkpoint
+from grammar_extra import load_hub_ids
 
 CORPUS_PATH = "/home/admin/Downloads/carbide/carbide_training_dataset.txt"
 CHECKPOINT_PATH = "head_checkpoint.pt"
@@ -71,7 +72,7 @@ def retrain_head(graph, n_epochs=3, checkpoint_path=CHECKPOINT_PATH,
     CORPUS_PATH -- e.g. a dialogue fine-tuning pass. None (default)
     preserves the exact original behavior."""
     tiles = json.load(open(tiles_path))
-    hub_ids = json.load(open(hubs_path)) if os.path.exists(hubs_path) else {}
+    hub_ids = load_hub_ids(hubs_path)
 
     data, train_starts, held_starts = _load_data(sample_bytes, corpus_bytes=corpus_bytes)
     tag_table = build_tag_table(graph, hub_ids, tiles, data)
