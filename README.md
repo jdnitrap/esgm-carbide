@@ -1,13 +1,25 @@
-# ESGM-GRU — Edge-State Graph Memory (GRU generator variant)
+# ESGM-CARBIDE — Edge-State Graph Memory (Carbide-SSM generator variant)
 
 **ESGM (Edge-State Graph Memory)** is a two-component architecture:
 an interpretable, from-scratch memory substrate, paired with a
 separate, swappable, gradient-trained generator that reads from it.
-This repo, **ESGM-GRU**, is the variant where that generator is a GRU.
-A sibling fork, **ESGM-CARBIDE**, pairs the identical memory component
-with a generator built on Carbide's proven CPU-optimized SSM patterns
-instead — same memory, different generator, so the two can be compared
-head-to-head rather than committing to one architecture on faith.
+This repo, **ESGM-CARBIDE**, is a git fork of **ESGM-GRU**
+(`jdnitrap/esgr`), intended to pair the identical memory component with
+a generator built on Carbide's proven, CPU-optimized SSM patterns
+(chunked parallel scan, incremental/cached decoding) instead of a GRU
+— so the two can eventually be compared head-to-head on identical
+memory behavior.
+
+**Status: fork point only, no Carbide-SSM code yet.** Everything in
+this repo right now — including `head.py`'s `NextByteRNN` — is an
+unmodified copy of ESGM-GRU at the commit this fork was cut from. The
+Generator here is currently still a GRU, not a Carbide-SSM model. This
+section will be rewritten to describe the real implementation once
+that work happens; until then, do not read this README as a claim that
+the swap is done. (This distinction matters: this project already
+spent real effort correcting a case where "planned" and "implemented"
+got conflated for an xLSTM that was never built — see "Naming" and the
+GRU section below. Same discipline applies here.)
 
 **Edge-State Graph Memory** (formerly named "Edge-State Graph
 Reasoner" — see "Naming" below for why that changed): a sparse,
@@ -76,7 +88,7 @@ component has a different constitution:
   weight. The Memory's version is a discretized MDBE, not a lossless
   one — only the Generator's version keeps the original graded nature.
 
-## GRU — this repo's Generator implementation
+## GRU — the inherited Generator implementation (pending replacement)
 
 **Gated Recurrent Unit (GRU)** (Cho et al., 2014): a recurrent neural
 network cell that maintains a single hidden state vector and updates
@@ -91,21 +103,26 @@ separate memory cell and three gates the way LSTM does. Given input
 - **Candidate state:** `h̃_t = tanh(W_h·x_t + U_h·(r_t ⊙ h_{t-1}))`.
 - **New hidden state:** `h_t = (1 − z_t)⊙h_{t-1} + z_t⊙h̃_t`.
 
-This repo's Generator (`head.py`'s `NextByteRNN`) is a single
-`torch.nn.GRU` layer over the concatenated [learned byte embedding +
-live MDBE tags] input, chosen deliberately over a hand-rolled xLSTM for
-correctness of a mature, well-tested implementation at this project's
-current scale — see `EXPERIMENT_LOG.md`, 2026-09-14, and "Naming"
-above. GRU's known limitation relative to xLSTM (Beck et al., 2024):
-GRU's gates saturate at ±1 (sigmoid/tanh), which degrades gracefully
-but loses precision over long sequences; xLSTM's exponential gating and
-(in its mLSTM variant) matrix-valued memory were built specifically to
-address that at long-context, large-scale regimes this project has not
-yet reached. This repo's GRU implementation is one instance of the
+**As of this fork's cut point, this repo's Generator (`head.py`'s
+`NextByteRNN`) is still this GRU** — inherited unmodified from
+ESGM-GRU, not yet replaced. The plan is to swap it for a generator
+built on Carbide's `SelectiveSSM` (chunked parallel scan +
+incremental/cached decoding, both already proven on this same CPU-only
+hardware — see "How it compares" below), because GRU's known
+limitation relative to that approach is real: GRU's gates saturate at
+±1 (sigmoid/tanh), which degrades gracefully but loses precision over
+long sequences, and it offers no algorithmic parallelism advantage the
+way a chunked SSM scan does. That said, per this project's own hardware
+constraint (CPU-only, no usable GPU), the deciding factor is not
+"which is more modern" but which is actually faster and correct on
+this hardware — Carbide's chunked scan and incremental decoding are
+already measured on this exact hardware; a naive hand-rolled xLSTM
+would not be (see "Naming" above for why xLSTM specifically was
+rejected). This repo's GRU implementation is one instance of the
 MDBE-Conditioned Autoregressive Generator contract, not the contract
-itself (see "Architecture" above) — swapping it for a different cell
-type or a different architecture family (as ESGM-CARBIDE does) requires
-no change to Edge-State Graph Memory.
+itself (see "Architecture" above) — that's precisely what makes
+replacing it here possible without touching Edge-State Graph Memory at
+all.
 
 ## Resources
 
@@ -248,7 +265,7 @@ ESGM-CARBIDE fork possible without touching this component at all.
 - **`task_c_contradiction.py`** — standalone script exercising the
   contradiction-energy suspension mechanism directly.
 
-**MDBE-Conditioned Autoregressive Generator (this repo's GRU implementation):**
+**MDBE-Conditioned Autoregressive Generator (inherited GRU implementation, pending Carbide-SSM replacement):**
 - **`head.py`** — `NextByteRNN`: a small, separate, gradient-trained
   next-byte prediction model. Concatenates a learned per-byte embedding
   with fixed, never-learned category/role/grammar flags read live off
@@ -350,7 +367,7 @@ separate, later, larger effort):
   edges) rather than chasing raw capability parity with Carbide-style
   models.
 
-## How it compares to Carbide, and to its own ESGM-CARBIDE fork
+## How it compares to Carbide, and to its parent ESGM-GRU
 
 Asked directly during development: is a sparse edge-memory graph with
 purely local Hebbian learning easier to build than an SSM/transformer?
@@ -359,16 +376,17 @@ weaker than gradient descent at discovering genuinely new structure**,
 but the tradeoff is much better interpretability/debuggability — every
 edge's state is directly inspectable and confirm/reject-able, unlike a
 dense learned weight matrix. That comparison is about [carbide](https://github.com/jdnitrap/carbide)
-itself, a separate from-scratch SSM language model.
+itself, a separate from-scratch SSM language model — and it's the
+project this repo's *planned* Generator borrows its SSM patterns from.
 
-**ESGM-CARBIDE** is a different comparison: a git fork of this exact
-repo, sharing Edge-State Graph Memory unchanged, where only the
-Generator differs — built on Carbide's proven, CPU-optimized SSM
-patterns (chunked parallel scan, incremental/cached decoding measured
-at ~63x faster per byte) instead of this repo's GRU. Because the
-Generator is a contract, not an architecture (see "Architecture"
-above), the two repos can be compared head-to-head on identical
-memory behavior, without risking this repo's proven baseline.
+**This repo (ESGM-CARBIDE) is a git fork of ESGM-GRU**
+(`jdnitrap/esgr`), sharing Edge-State Graph Memory unchanged. Once the
+Generator swap described above actually happens, the two repos will
+differ only in Generator implementation — GRU in the parent, a
+Carbide-SSM-based generator here — and can be compared head-to-head on
+identical memory behavior, without risking the parent's proven
+baseline. **Until that swap is implemented, this repo is not yet a
+real comparison point** — it's presently identical to its parent.
 
 ## Track record
 
