@@ -11,7 +11,7 @@ from fact_gate import FactGate
 from byte_identity import wire_byte_identity, CATEGORY_OFFSET, CATEGORY_NAMES
 from word_structure import wire_word_structure, ROLE_OFFSET, ROLE_NAMES
 from expand_vocab import auto_expand_vocab
-from grammar_extra import hub_node_ids
+from grammar_extra import hub_node_ids, load_hub_ids
 from retrain_head import retrain_head, uncertainty_signal
 from decode import decode
 from sequence import generate_sequence, DEFAULT_GRAMMAR, GRAMMARS
@@ -22,6 +22,8 @@ STIM_VALUE = 3.0
 with open("tiles.json") as f:
     TILES = json.load(f)
 TILES_REV = {v: k for k, v in TILES.items()}
+
+HUB_IDS = load_hub_ids()
 
 
 def resolve(token):
@@ -124,6 +126,7 @@ def main():
             return
         print(f"[autopilot] uncertainty={n} >= {autopilot['threshold']} -- growing vocabulary and retraining")
         stats = auto_expand_vocab(graph, TILES, n_words=10)
+        gate.resync()  # auto_expand_vocab grows the graph internally -- keep the gate covering the new edges
         TILES_REV.clear()
         TILES_REV.update({v: k for k, v in TILES.items()})
         print(f"[autopilot] mined {len(stats['mined'])} words, grew graph {stats['grown']} times")
@@ -216,6 +219,7 @@ def main():
         elif cmd == "autoexpand":
             n = int(args[0]) if args else 20
             stats = auto_expand_vocab(graph, TILES, n_words=n)
+            gate.resync()  # auto_expand_vocab grows the graph internally -- keep the gate covering the new edges
             TILES_REV.clear()
             TILES_REV.update({v: k for k, v in TILES.items()})
             shown = ", ".join(stats["mined"][:10]) + ("..." if len(stats["mined"]) > 10 else "")
@@ -316,6 +320,7 @@ def main():
                 with open("tiles.json", "w") as f:
                     json.dump(TILES, f, indent=2)
                 wire_word_structure(graph)  # attach the new word's letters-in/role-out edges
+                gate.resync()  # letters-in/role-out edges above are new appends -- keep the gate covering them
                 print(f"tiled {name} {node} -- remember to `save` to persist the grown graph")
 
         elif cmd == "tiles":
@@ -359,7 +364,7 @@ def main():
             if not prompt_nodes:
                 print("no tile")
                 continue
-            seq, trace = generate_sequence(graph, prompt_nodes, grammar=grammar, max_len=len(grammar))
+            seq, trace = generate_sequence(graph, prompt_nodes, grammar=grammar, max_len=len(grammar), hub_ids=HUB_IDS)
             names = [TILES_REV.get(n, n) for n in seq]
             role_matches = sum(1 for t in trace if str(t.get("reason", "")).startswith("role_match"))
             print(" ".join(str(n) for n in names))

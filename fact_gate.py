@@ -28,6 +28,26 @@ class FactGate:
         self.consecutive_high_trust = torch.zeros(n_edges, dtype=torch.long)
         self.proposed = torch.zeros(n_edges, dtype=torch.bool)
 
+    def resync(self):
+        """Call after graph.grow() / add_learnable_edge() / add_fixed_edge()
+        append new edges -- this gate's own tensors were sized once at
+        __init__ to graph.src.shape[0] and never grow with the graph on
+        their own. Found by testing: new edges from growth were silently
+        outside confirm/reject coverage, since step() indexes
+        consecutive_high_trust/proposed by edge id and a stale, shorter
+        tensor either errors or -- worse -- silently misaligns once
+        edge ids it was never sized for exist. Append-only, same
+        invariant as the graph's own tensors: existing entries never
+        move."""
+        n_edges = self.graph.src.shape[0]
+        n_missing = n_edges - self.consecutive_high_trust.shape[0]
+        if n_missing <= 0:
+            return
+        self.consecutive_high_trust = torch.cat(
+            [self.consecutive_high_trust, torch.zeros(n_missing, dtype=torch.long)]
+        )
+        self.proposed = torch.cat([self.proposed, torch.zeros(n_missing, dtype=torch.bool)])
+
     def step(self):
         """Timer proposes candidates. If auto_confirm is set, a newly
         proposed candidate whose CURRENT tau also clears

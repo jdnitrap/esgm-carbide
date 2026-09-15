@@ -27,7 +27,8 @@ from generate_bytes import generate_bytes
 
 g = ESGRGraph.load_json("graph.json")
 tiles = json.load(open("tiles.json"))
-hub_ids = json.load(open("grammar_extra_hubs.json"))
+from grammar_extra import load_hub_ids
+hub_ids = load_hub_ids()
 model, _, _, _ = load_head_checkpoint("head_checkpoint.pt", new_tag_dim=N_COLUMNS)
 tiled_words = {k.lower() for k in tiles if k.isalpha()}
 

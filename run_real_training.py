@@ -38,7 +38,8 @@ from head_checkpoint import load_head_checkpoint
 model, _, _, _ = load_head_checkpoint("head_checkpoint.pt")
 
 tiles = json.load(open("tiles.json"))
-hub_ids = json.load(open("grammar_extra_hubs.json"))
+from grammar_extra import load_hub_ids
+hub_ids = load_hub_ids()
 with open(CORPUS_PATH, "rb") as f:
     teach_data = f.read()[FULL_CORPUS_BYTES - 500_000:FULL_CORPUS_BYTES]  # a real, held-out-ish tail slice
 teach_tags = build_tag_table(g, hub_ids, tiles, teach_data)
