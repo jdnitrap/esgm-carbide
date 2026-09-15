@@ -76,6 +76,37 @@ component has a different constitution:
   weight. The Memory's version is a discretized MDBE, not a lossless
   one — only the Generator's version keeps the original graded nature.
 
+## GRU — this repo's Generator implementation
+
+**Gated Recurrent Unit (GRU)** (Cho et al., 2014): a recurrent neural
+network cell that maintains a single hidden state vector and updates
+it at every sequence step using two learned gates, rather than a
+separate memory cell and three gates the way LSTM does. Given input
+`x_t` and previous hidden state `h_{t-1}`:
+
+- **Update gate:** `z_t = sigmoid(W_z·x_t + U_z·h_{t-1})` — how much of
+  the old hidden state to keep vs. replace.
+- **Reset gate:** `r_t = sigmoid(W_r·x_t + U_r·h_{t-1})` — how much the
+  past state should influence the new candidate at all.
+- **Candidate state:** `h̃_t = tanh(W_h·x_t + U_h·(r_t ⊙ h_{t-1}))`.
+- **New hidden state:** `h_t = (1 − z_t)⊙h_{t-1} + z_t⊙h̃_t`.
+
+This repo's Generator (`head.py`'s `NextByteRNN`) is a single
+`torch.nn.GRU` layer over the concatenated [learned byte embedding +
+live MDBE tags] input, chosen deliberately over a hand-rolled xLSTM for
+correctness of a mature, well-tested implementation at this project's
+current scale — see `EXPERIMENT_LOG.md`, 2026-09-14, and "Naming"
+above. GRU's known limitation relative to xLSTM (Beck et al., 2024):
+GRU's gates saturate at ±1 (sigmoid/tanh), which degrades gracefully
+but loses precision over long sequences; xLSTM's exponential gating and
+(in its mLSTM variant) matrix-valued memory were built specifically to
+address that at long-context, large-scale regimes this project has not
+yet reached. This repo's GRU implementation is one instance of the
+MDBE-Conditioned Autoregressive Generator contract, not the contract
+itself (see "Architecture" above) — swapping it for a different cell
+type or a different architecture family (as ESGM-CARBIDE does) requires
+no change to Edge-State Graph Memory.
+
 ## Resources
 
 This architecture combines several well-established ideas from prior
@@ -92,6 +123,8 @@ though the specific combination is original to this project.
 | Fact-gating / contradiction suspension | Doyle, J. (1979), "A Truth Maintenance System," *Artificial Intelligence* 12(3) |
 | Local-rule vs. backprop ceiling (grounds this project's own honesty about that tradeoff, below) | Lillicrap, T.P. et al. (2020), "Backpropagation and the Brain," *Nature Reviews Neuroscience* |
 | Oja's rule (candidate Hebbian variant, not yet used) | Oja, E. (1982), "A Simplified Neuron Model as a Principal Component Analyzer," *J. Mathematical Biology* |
+| GRU (this repo's Generator implementation) | Cho, K. et al. (2014), "Learning Phrase Representations using RNN Encoder-Decoder for Statistical Machine Translation," arXiv |
+| xLSTM (named alternative, not implemented in this repo) | Beck, M. et al. (2024), "xLSTM: Extended Long Short-Term Memory," arXiv |
 | BCM rule (candidate Hebbian variant, not yet used) | Bienenstock, Cooper & Munro (1982), *J. Neuroscience* |
 | MDBE | Original to this project (Carbide) — not literature-derived |
 
